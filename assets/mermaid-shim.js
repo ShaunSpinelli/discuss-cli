@@ -29,6 +29,15 @@
     if (pre.parentElement) pre.parentElement.insertBefore(note, pre.nextSibling);
   }
 
+  // Match Mermaid's built-in theme to the page theme so diagrams stay
+  // legible in dark mode (light-on-dark) instead of rendering dark lines
+  // and labels on the dark page background.
+  function currentMermaidTheme() {
+    return document.documentElement.getAttribute('data-theme') === 'dark'
+      ? 'dark'
+      : 'default';
+  }
+
   function renderBlocks() {
     const mermaid = window.mermaid;
     if (!mermaid || typeof mermaid.render !== 'function') return;
@@ -36,13 +45,18 @@
       mermaid.initialize({
         startOnLoad: false,
         securityLevel: 'loose',
-        theme: 'default',
+        theme: currentMermaidTheme(),
       });
     }
 
     document.querySelectorAll('pre[data-mermaid="pending"]').forEach(function (pre) {
       const code = pre.querySelector('code.language-mermaid');
-      const source = code ? code.textContent || '' : '';
+      // Rendering replaces the <code> with the SVG, so stash the source to
+      // allow a re-render when the page theme changes (see setTheme below).
+      const source = code
+        ? code.textContent || ''
+        : pre.getAttribute('data-mermaid-src') || '';
+      pre.setAttribute('data-mermaid-src', source);
       const id = 'discuss-mermaid-' + renderSeq++;
       try {
         mermaid
@@ -83,6 +97,25 @@
     if (markBlocks().length || document.querySelector('pre[data-mermaid="pending"]')) {
       ensureLoadedThenRender();
     }
+  };
+
+  // Re-render every diagram with the current page theme. Called by the theme
+  // toggle in discuss.html — the theme is baked into each SVG at render time,
+  // so switching light/dark requires rebuilding from the stashed source.
+  window.__discussSetMermaidTheme = function () {
+    const rendered = document.querySelectorAll(
+      'pre[data-mermaid="rendered"], pre[data-mermaid="error"]'
+    );
+    if (!rendered.length) return;
+    rendered.forEach(function (pre) {
+      const note = pre.nextSibling;
+      if (note && note.nodeType === 1 && note.classList.contains('mermaid-error')) {
+        note.parentNode.removeChild(note);
+      }
+      pre.innerHTML = '';
+      pre.setAttribute('data-mermaid', 'pending');
+    });
+    ensureLoadedThenRender();
   };
 
   if (markBlocks().length) ensureLoadedThenRender();

@@ -5446,6 +5446,9 @@
       item.classList.toggle('active', isActive);
       item.setAttribute('aria-checked', isActive ? 'true' : 'false');
     });
+    // Mermaid bakes its theme into the SVG at render time, so re-render any
+    // diagrams to match the new page theme.
+    if (typeof window.__discussSetMermaidTheme === 'function') window.__discussSetMermaidTheme();
   }
   function initThemeToggle() {
     const btn = document.getElementById('theme-toggle');
