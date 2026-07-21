@@ -158,6 +158,7 @@ While the server is running:
 |--------|------|---------|
 | `GET` | `/api/state` | Current snapshot: threads, replies, takes, drafts, files, verdictConfig |
 | `GET` | `/api/events` | SSE event stream (browser UI) |
+| `GET` | `/api/files/{id}/context?section=N` | Whole new-side file content for a diff section (context expansion) |
 | `POST` | `/api/threads` | Create a thread (`fileId` required when several files are loaded) |
 | `POST` | `/api/threads/{id}/replies` | Add a **human** reply |
 | `POST` | `/api/threads/{id}/takes` | Add an **agent** take |

@@ -98,6 +98,13 @@
     --pending-border: #d0c28a;
     --pending-dark: #8a7a3a;
     --pre-bg: #f0efeb;
+    --diff-add-bg: rgba(46, 160, 67, 0.14);
+    --diff-add-num-bg: rgba(46, 160, 67, 0.28);
+    --diff-del-bg: rgba(248, 81, 73, 0.12);
+    --diff-del-num-bg: rgba(248, 81, 73, 0.24);
+    --diff-header-bg: rgba(84, 174, 255, 0.14);
+    --diff-empty-bg: rgba(0, 0, 0, 0.035);
+    --diff-num-ink: #8a8a86;
     --marker-blue: #3b82f6;
     --marker-yellow: #e9b949;
     --marker-pink: #d75d82;
@@ -133,6 +140,13 @@
     --pending-border: #6a5a30;
     --pending-dark: #c8a85a;
     --pre-bg: #2d2d2c;
+    --diff-add-bg: rgba(63, 185, 80, 0.16);
+    --diff-add-num-bg: rgba(63, 185, 80, 0.32);
+    --diff-del-bg: rgba(248, 81, 73, 0.16);
+    --diff-del-num-bg: rgba(248, 81, 73, 0.32);
+    --diff-header-bg: rgba(84, 174, 255, 0.16);
+    --diff-empty-bg: rgba(255, 255, 255, 0.03);
+    --diff-num-ink: #7a7a76;
     --marker-blue: #5a9bff;
     --marker-yellow: #f0c860;
     --marker-pink: #e87a9c;
@@ -1296,6 +1310,174 @@
   pre.line-numbers .line-numbers-rows > span.has-thread-line:hover::after {
     left: calc(100% + 10px);
   }
+
+  /* ---------- Structured diff rendering (.diff-hunk) ----------
+     Diff files render client-side from the server's structured model: one
+     .diff-hunk per hunk (the commentable anchor, mirroring .pre-wrap), one
+     .dh-row per hunk line with data-line = hunk-local line number (line 1 =
+     the @@ header). Line numbers and +/- signs are CSS pseudo-elements so
+     textContent, selection, and copies stay clean. */
+  /* No overflow-x here: thread markers hang outside the block's right edge
+     (same reason .pre-wrap exists), and .dh-text wraps long lines instead. */
+  #doc-content .diff-hunk {
+    position: relative;
+    margin: 10px 0;
+    background: var(--pre-bg);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+  #doc-content .diff-hunk code {
+    background: none;
+    padding: 0;
+    font-size: inherit;
+    border-radius: 0;
+  }
+  #doc-content p.diff-file-meta { color: var(--muted); font-size: 13px; }
+  .dh-row {
+    display: grid;
+    grid-template-columns: 3.4em 3.4em 1fr;
+  }
+  .dh-num {
+    position: relative;
+    text-align: right;
+    padding: 0 8px 0 4px;
+    color: var(--diff-num-ink);
+    user-select: none;
+    cursor: pointer;
+  }
+  .dh-num::before { content: attr(data-n); }
+  .dh-num:hover { background: var(--accent-soft); }
+  .dh-num:hover::after {
+    content: '💬';
+    position: absolute;
+    left: calc(100% - 2px);
+    top: -2px;
+    font-size: 12px;
+    line-height: 1.2;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .dh-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    padding: 0 10px 0 20px;
+    position: relative;
+  }
+  /* Empty diff lines still need row height. Pseudo-content is invisible to
+     textContent/selection, so anchoring text stays faithful. */
+  .dh-text code:empty::after,
+  .dh-cell code:empty::after { content: '\00a0'; }
+  /* The +/- sign column, rendered outside the copyable text. */
+  .dh-text::before,
+  .dh-cell::before {
+    position: absolute;
+    left: 7px;
+    color: var(--diff-num-ink);
+  }
+  .dh-row.add .dh-text::before { content: '+'; }
+  .dh-row.del .dh-text::before { content: '-'; }
+  .dh-cell.add::before { content: '+'; }
+  .dh-cell.del::before { content: '-'; }
+  .dh-row.add { background: var(--diff-add-bg); }
+  .dh-row.add .dh-num { background: var(--diff-add-num-bg); }
+  .dh-row.del { background: var(--diff-del-bg); }
+  .dh-row.del .dh-num { background: var(--diff-del-num-bg); }
+  .dh-row.dh-header {
+    background: var(--diff-header-bg);
+    color: var(--muted);
+    padding: 3px 0;
+  }
+  .dh-row.meta { color: var(--muted); font-style: italic; }
+  /* Line-anchoring states, matching the Prism-gutter equivalents above:
+     thread bar at the left edge, tints for drafts and open threads. */
+  .dh-row.has-thread-line { box-shadow: inset 3px 0 0 0 var(--marker-pink); }
+  .dh-row.has-thread-line.thread-resolved-line {
+    box-shadow: inset 3px 0 0 0 rgba(46, 125, 50, 0.6);
+  }
+  .dh-row.draft-active-line {
+    background: var(--accent-soft);
+    box-shadow: inset 3px 0 0 0 var(--accent);
+  }
+  .dh-row.thread-active-line {
+    background: rgba(255, 236, 139, 0.55);
+    box-shadow: inset 3px 0 0 0 var(--accent);
+  }
+  html[data-theme="dark"] .dh-row.thread-active-line {
+    background: rgba(255, 236, 139, 0.22);
+  }
+  /* Side-by-side rows: four columns — old num, old code, new num, new code.
+     Both cells of a logical line carry the same data-line, so anchoring
+     classes land on cells rather than the row (a row holds two lines). */
+  .dh-srow {
+    display: grid;
+    grid-template-columns: 3.4em 1fr 3.4em 1fr;
+  }
+  .dh-cell {
+    white-space: pre-wrap;
+    word-break: break-word;
+    padding: 0 10px 0 20px;
+    position: relative;
+  }
+  .dh-srow > .dh-num.new { border-left: 1px solid var(--line); }
+  .dh-cell.add { background: var(--diff-add-bg); }
+  .dh-cell.del { background: var(--diff-del-bg); }
+  .dh-num.add { background: var(--diff-add-num-bg); }
+  .dh-num.del { background: var(--diff-del-num-bg); }
+  .dh-cell.empty, .dh-num.empty { background: var(--diff-empty-bg); cursor: default; }
+  .dh-num.has-thread-line { box-shadow: inset 3px 0 0 0 var(--marker-pink); }
+  .dh-num.has-thread-line.thread-resolved-line {
+    box-shadow: inset 3px 0 0 0 rgba(46, 125, 50, 0.6);
+  }
+  .dh-cell.draft-active-line, .dh-num.draft-active-line {
+    background: var(--accent-soft);
+  }
+  .dh-cell.thread-active-line, .dh-num.thread-active-line {
+    background: rgba(255, 236, 139, 0.55);
+  }
+  html[data-theme="dark"] .dh-cell.thread-active-line,
+  html[data-theme="dark"] .dh-num.thread-active-line {
+    background: rgba(255, 236, 139, 0.22);
+  }
+  /* Context-expansion gaps between hunks: revealed rows (view-only — no
+     data-line, so never commentable) plus GitHub-style expander buttons. */
+  .diff-gap {
+    margin: 2px 0;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+  .diff-gap .dg-rows { background: var(--pre-bg); }
+  #doc-content .diff-gap code {
+    background: none;
+    padding: 0;
+    font-size: inherit;
+    border-radius: 0;
+  }
+  .diff-gap .dg-ctx .dh-num { cursor: default; }
+  .diff-gap .dg-ctx .dh-num:hover { background: none; }
+  .diff-gap .dg-ctx .dh-num:hover::after { content: none; }
+  .dg-controls { display: flex; gap: 1px; }
+  .dg-controls[hidden] { display: none; }
+  .dg-btn {
+    flex: 1;
+    border: none;
+    background: var(--diff-header-bg);
+    color: var(--accent);
+    cursor: pointer;
+    padding: 3px 8px;
+    font: inherit;
+    font-size: 12px;
+    border-radius: 3px;
+  }
+  .dg-btn:hover { background: var(--accent-soft); }
+
+  /* Unified ↔ split segmented toggle in the header. */
+  header .view-toggle { display: inline-flex; }
+  header .view-toggle .toggle { border-radius: 0; }
+  header .view-toggle .toggle:first-child { border-radius: 6px 0 0 6px; }
+  header .view-toggle .toggle:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
   .thread-marker.is-resolved { background: #2e7d32 !important; color: white !important; }
 
   /* Draft marker (new-thread draft — user started typing a new comment
@@ -1382,6 +1564,10 @@
   <a class="header-icon-link" id="github-link" href="https://github.com/codesoda/discuss-cli" target="_blank" rel="noopener noreferrer" title="View source on GitHub" aria-label="View source on GitHub">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.635 22.412c.575.107.785-.25.785-.555 0-.273-.01-.998-.015-1.96-3.198.695-3.873-1.541-3.873-1.541-.523-1.328-1.276-1.683-1.276-1.683-1.044-.713.079-.699.079-.699 1.155.082 1.762 1.187 1.762 1.187 1.026 1.758 2.692 1.25 3.348.955.103-.744.401-1.25.73-1.538-2.553-.291-5.236-1.276-5.236-5.681 0-1.255.448-2.282 1.184-3.087-.119-.291-.513-1.46.112-3.045 0 0 .967-.31 3.167 1.179a10.96 10.96 0 0 1 2.882-.388c.978.005 1.962.132 2.881.388 2.198-1.489 3.163-1.179 3.163-1.179.627 1.585.233 2.754.115 3.045.737.805 1.182 1.832 1.182 3.087 0 4.416-2.687 5.387-5.247 5.672.413.355.78 1.057.78 2.131 0 1.539-.014 2.778-.014 3.156 0 .308.207.668.79.554A11.5 11.5 0 0 0 12 .5z"/></svg>
   </a>
+  <span id="diff-view-toggle" class="view-toggle" hidden>
+    <button class="toggle" data-view="unified" title="Unified diff view">Unified</button>
+    <button class="toggle" data-view="split" title="Side-by-side diff view">Split</button>
+  </span>
   <button class="toggle" id="show-all" title="Pin every thread open at once">Show all</button>
   <span class="theme-menu" id="theme-menu">
     <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Color theme" aria-haspopup="menu" aria-expanded="false" title="Color theme">
@@ -1552,6 +1738,53 @@
       .filter(f => f && f.id != null)
       .map(f => [String(f.id), typeof f.html === 'string' ? f.html : ''])
   );
+  // Diff files ship a structured model instead of rendered HTML; the client
+  // renders it into the document itself (see renderDiffFile).
+  const diffDataByFile = new Map(
+    (Array.isArray(window.__DISCUSS_RENDERED_FILES__) ? window.__DISCUSS_RENDERED_FILES__ : [])
+      .filter(f => f && f.id != null && f.diff && Array.isArray(f.diff.sections))
+      .map(f => [String(f.id), f.diff])
+  );
+  // Unified ↔ split diff view. Persisted as a UI preference like the theme
+  // key — never document/thread state. Defaults to side-by-side.
+  const DIFF_VIEW_STORAGE_KEY = 'discuss-diff-view';
+  let diffViewMode = 'split';
+  try {
+    const storedView = localStorage.getItem(DIFF_VIEW_STORAGE_KEY);
+    if (storedView === 'unified' || storedView === 'split') diffViewMode = storedView;
+  } catch { /* private mode */ }
+  function setDiffViewMode(mode) {
+    if (mode !== 'unified' && mode !== 'split') return;
+    if (mode !== diffViewMode) {
+      diffViewMode = mode;
+      try { localStorage.setItem(DIFF_VIEW_STORAGE_KEY, mode); } catch { /* private mode */ }
+      if (diffDataByFile.has(activeFileId)) {
+        // Same re-run sequence as a file switch, minus the scroll reset.
+        // Block enumeration is identical in both views, so every thread and
+        // draft re-attaches to the same anchor indices.
+        if (typeof closeNewThreadEditor === 'function' && newThreadEditor) closeNewThreadEditor();
+        renderDiffFile(activeFileId);
+        wrapCollapsibleSectionsDom();
+        assignAnchorIndices();
+        buildHeadingMinimap();
+        highlightCodeBlocks();
+        renderAllThreads();
+        scheduleReposition();
+      }
+    }
+    updateDiffViewToggle();
+  }
+  function updateDiffViewToggle() {
+    const host = document.getElementById('diff-view-toggle');
+    if (!host) return;
+    host.hidden = !diffDataByFile.has(activeFileId);
+    host.querySelectorAll('button[data-view]').forEach(btn => {
+      btn.classList.toggle('on', btn.dataset.view === diffViewMode);
+    });
+  }
+  document.querySelectorAll('#diff-view-toggle button[data-view]').forEach(btn => {
+    btn.addEventListener('click', () => setDiffViewMode(btn.dataset.view));
+  });
   let discussFiles = [];
   let activeFileId = DEFAULT_FILE_ID;
 
@@ -1908,13 +2141,26 @@
     if (!doc) return;
     const updatedFileId = payload.fileId ? String(payload.fileId) : DEFAULT_FILE_ID;
     // Keep the pre-rendered copy fresh so switching to this file later shows
-    // the updated content.
-    renderedFileHtml.set(updatedFileId, payload.renderedHtml);
+    // the updated content. Diff files carry a structured model instead of
+    // rendered HTML.
+    const updatedDiff = payload.diff && Array.isArray(payload.diff.sections) ? payload.diff : null;
+    if (updatedDiff) {
+      diffDataByFile.set(updatedFileId, updatedDiff);
+      // The diff snapshot changed: cached new-side content and gap
+      // expansions describe the old hunk layout.
+      clearDiffContextFor(updatedFileId);
+    } else {
+      renderedFileHtml.set(updatedFileId, payload.renderedHtml);
+    }
     const isActiveFile = updatedFileId === activeFileId;
     if (isActiveFile) {
       // In-flight new-thread selections anchor into the old source; drop them.
       if (typeof closeNewThreadEditor === 'function') closeNewThreadEditor();
-      doc.innerHTML = payload.renderedHtml;
+      if (updatedDiff) {
+        renderDiffFile(updatedFileId);
+      } else {
+        doc.innerHTML = payload.renderedHtml;
+      }
       wrapCollapsibleSectionsDom();
       assignAnchorIndices();
       buildHeadingMinimap();
@@ -1934,6 +2180,11 @@
       if (!a.orphaned) {
         t[startKey] = parseInt(a.anchorStart, 10);
         t[endKey] = parseInt(a.anchorEnd, 10);
+        // A source update replaces the stored lineRange wholesale — absent
+        // means cleared, not unchanged.
+        t.lineRange = a.lineRange && Number.isFinite(parseInt(a.lineRange.start, 10))
+          ? { start: parseInt(a.lineRange.start, 10), end: parseInt(a.lineRange.end, 10) }
+          : null;
       }
     };
     (s.userThreads || []).forEach(t => applyAnchor(t, 'anchorStart', 'anchorEnd'));
@@ -2683,7 +2934,7 @@
   // Any element matching this selector inside #doc-content becomes commentable.
   // <pre> is commented-on via a generated .pre-wrap wrapper because <pre>'s
   // own overflow-x: auto clips the absolutely-positioned gutter marker.
-  const COMMENTABLE_SELECTOR = 'h1, h2, h3, h4, h5, p, li, blockquote, .pre-wrap, .quote, .decision, .callout, .context';
+  const COMMENTABLE_SELECTOR = 'h1, h2, h3, h4, h5, p, li, blockquote, .pre-wrap, .quote, .decision, .callout, .context, .diff-hunk';
   function assignAnchorIndices() {
     const doc = document.getElementById('doc-content');
     if (!doc) return;
@@ -2705,6 +2956,441 @@
     });
   }
   assignAnchorIndices();
+
+  // ---------- Structured diff rendering ----------
+  // Diff files arrive as a structured model ({sections: [{path, lang, notes,
+  // hunks: [{header, lines: [{kind, old, new, text}]}]}]}) and render here
+  // instead of via server HTML. Block enumeration deliberately matches what
+  // the old synthesized markdown produced — one h3 (path), one p (notes),
+  // one container per hunk — so anchor indices stay identical. Every hunk
+  // line carries data-line = its hunk-local line number (line 1 = the @@
+  // header), the same coordinate stored in thread lineRange.
+  function renderDiffFile(fileId) {
+    const doc = document.getElementById('doc-content');
+    const data = diffDataByFile.get(String(fileId));
+    if (!doc || !data) return false;
+    doc.innerHTML = '';
+    data.sections.forEach((section, sectionIdx) => {
+      // One container per `diff --git` block scopes syntax highlighting (a
+      // .patch can mix languages) and groups a section's gaps and hunks.
+      const sectionEl = document.createElement('section');
+      sectionEl.className = 'diff-section';
+      doc.appendChild(sectionEl);
+
+      const heading = document.createElement('h3');
+      const pathCode = document.createElement('code');
+      pathCode.textContent = section.path || '';
+      heading.appendChild(pathCode);
+      sectionEl.appendChild(heading);
+
+      if (Array.isArray(section.notes) && section.notes.length) {
+        sectionEl.appendChild(buildDiffNotes(section.notes));
+      }
+
+      if (typeof section.raw === 'string') {
+        // Non-git content: legacy path — a plain fenced block that Prism's
+        // element pipeline highlights with line-number gutters.
+        const pre = document.createElement('pre');
+        const code = document.createElement('code');
+        code.className = 'language-' + (section.lang ? 'diff-' + section.lang : 'diff');
+        code.textContent = section.raw;
+        pre.appendChild(code);
+        sectionEl.appendChild(pre);
+        return;
+      }
+
+      if (!Array.isArray(section.hunks) || !section.hunks.length) {
+        const p = document.createElement('p');
+        const em = document.createElement('em');
+        em.textContent = 'No textual changes to review.';
+        p.appendChild(em);
+        sectionEl.appendChild(p);
+        return;
+      }
+
+      const buildHunk = diffViewMode === 'split' ? buildSplitHunk : buildUnifiedHunk;
+      const sectionNo = sectionIdx + 1;
+      section.hunks.forEach((hunk, hunkIdx) => {
+        const gap = buildDiffGap(section, sectionNo, hunkIdx);
+        if (gap) sectionEl.appendChild(gap);
+        sectionEl.appendChild(buildHunk(hunk));
+      });
+      const tailGap = buildDiffGap(section, sectionNo, section.hunks.length);
+      if (tailGap) sectionEl.appendChild(tailGap);
+      highlightDiffCode(sectionEl, section.lang);
+    });
+    return true;
+  }
+
+  // Notes like "renamed to `x`" carry markdown backticks; render the
+  // backticked spans as <code> like the old markdown pipeline did.
+  function buildDiffNotes(notes) {
+    const p = document.createElement('p');
+    p.className = 'diff-file-meta';
+    notes.join(' · ').split('`').forEach((part, i) => {
+      if (!part && i === 0) return;
+      if (i % 2 === 1) {
+        const code = document.createElement('code');
+        code.textContent = part;
+        p.appendChild(code);
+      } else if (part) {
+        p.appendChild(document.createTextNode(part));
+      }
+    });
+    return p;
+  }
+
+  function diffKindClass(line) {
+    return line.kind === 'add' ? 'add'
+      : line.kind === 'del' ? 'del'
+      : line.kind === 'meta' ? 'meta'
+      : 'ctx';
+  }
+
+  // The @@ header renders identically in both views: a full-width row that is
+  // hunk-local line 1 (a valid lineRange target, exactly as before).
+  function buildHunkHeaderRow(hunk) {
+    const header = document.createElement('div');
+    header.className = 'dh-row dh-header';
+    header.setAttribute('data-line', '1');
+    header.appendChild(buildNumCell('old', null));
+    header.appendChild(buildNumCell('new', null));
+    const headerText = document.createElement('span');
+    headerText.className = 'dh-text';
+    headerText.textContent = hunk.header || '';
+    header.appendChild(headerText);
+    return header;
+  }
+
+  function buildUnifiedHunk(hunk) {
+    const el = document.createElement('div');
+    el.className = 'diff-hunk unified';
+    el.appendChild(buildHunkHeaderRow(hunk));
+
+    (hunk.lines || []).forEach((line, i) => {
+      const n = i + 2; // hunk-local line number; the @@ header is line 1
+      const row = document.createElement('div');
+      row.className = 'dh-row ' + diffKindClass(line);
+      row.setAttribute('data-line', String(n));
+      row.appendChild(buildNumCell('old', line.old));
+      row.appendChild(buildNumCell('new', line.new));
+      const text = document.createElement('span');
+      text.className = 'dh-text';
+      const code = document.createElement('code');
+      code.textContent = line.text || '';
+      text.appendChild(code);
+      row.appendChild(text);
+      el.appendChild(row);
+    });
+    return el;
+  }
+
+  // Side-by-side projection: del/add runs pair up (GitHub-style), context
+  // lines appear on both sides carrying the same data-line, unpaired sides
+  // render as .empty filler cells with no data-line (not commentable).
+  function buildSplitHunk(hunk) {
+    const el = document.createElement('div');
+    el.className = 'diff-hunk split';
+    el.appendChild(buildHunkHeaderRow(hunk));
+
+    const lines = hunk.lines || [];
+    const entryAt = (i) => ({ line: lines[i], n: i + 2 });
+    let i = 0;
+    while (i < lines.length) {
+      const kind = lines[i].kind;
+      if (kind === 'del' || kind === 'add') {
+        const dels = [];
+        const adds = [];
+        while (i < lines.length && lines[i].kind === 'del') { dels.push(entryAt(i)); i++; }
+        while (i < lines.length && lines[i].kind === 'add') { adds.push(entryAt(i)); i++; }
+        const rows = Math.max(dels.length, adds.length);
+        for (let k = 0; k < rows; k++) {
+          el.appendChild(buildSplitRow(dels[k] || null, adds[k] || null));
+        }
+      } else if (kind === 'meta') {
+        // "\ No newline at end of file" — full-width dim row, keeps its
+        // hunk-local line index so lineRange numbering stays faithful.
+        const entry = entryAt(i);
+        const row = document.createElement('div');
+        row.className = 'dh-row meta';
+        row.setAttribute('data-line', String(entry.n));
+        row.appendChild(buildNumCell('old', null));
+        row.appendChild(buildNumCell('new', null));
+        const text = document.createElement('span');
+        text.className = 'dh-text';
+        const code = document.createElement('code');
+        code.textContent = entry.line.text || '';
+        text.appendChild(code);
+        row.appendChild(text);
+        el.appendChild(row);
+        i++;
+      } else {
+        const entry = entryAt(i);
+        el.appendChild(buildSplitRow(entry, entry));
+        i++;
+      }
+    }
+    return el;
+  }
+
+  function buildSplitRow(oldEntry, newEntry) {
+    const row = document.createElement('div');
+    row.className = 'dh-srow';
+    row.appendChild(buildSplitNum('old', oldEntry, oldEntry ? oldEntry.line.old : null));
+    row.appendChild(buildSplitCell('old', oldEntry));
+    row.appendChild(buildSplitNum('new', newEntry, newEntry ? newEntry.line.new : null));
+    row.appendChild(buildSplitCell('new', newEntry));
+    return row;
+  }
+
+  function buildSplitNum(side, entry, lineNo) {
+    const cell = buildNumCell(side, lineNo);
+    if (!entry) {
+      cell.classList.add('empty');
+      return cell;
+    }
+    cell.classList.add(diffKindClass(entry.line));
+    cell.setAttribute('data-line', String(entry.n));
+    return cell;
+  }
+
+  function buildSplitCell(side, entry) {
+    const cell = document.createElement('span');
+    cell.className = 'dh-cell ' + side;
+    if (!entry) {
+      cell.classList.add('empty');
+      return cell;
+    }
+    cell.classList.add(diffKindClass(entry.line));
+    cell.setAttribute('data-line', String(entry.n));
+    const code = document.createElement('code');
+    code.textContent = entry.line.text || '';
+    cell.appendChild(code);
+    return cell;
+  }
+
+  function buildNumCell(side, lineNo) {
+    const cell = document.createElement('span');
+    cell.className = 'dh-num ' + side;
+    if (lineNo != null) cell.setAttribute('data-n', String(lineNo));
+    return cell;
+  }
+
+  // ---------- Context expansion (GitHub-style gap expanders) ----------
+  // Each gap between hunks (plus above the first and below the last) hosts
+  // expander buttons that reveal surrounding file lines fetched from
+  // GET /api/files/{id}/context. Revealed rows are VIEW-ONLY: they carry no
+  // data-line and no anchor index, so they can never shift existing thread
+  // anchors — expansion never touches the anchoring model.
+  const DIFF_CTX_STEP = 20;
+  const diffContextCache = new Map(); // fileId:section -> Promise<string[]|null>
+  const diffExpansions = new Map();   // fileId:section:gap -> {top, bottom}
+
+  function clearDiffContextFor(fileId) {
+    const prefix = String(fileId) + ':';
+    [diffContextCache, diffExpansions].forEach(map => {
+      Array.from(map.keys())
+        .filter(key => key.startsWith(prefix))
+        .forEach(key => map.delete(key));
+    });
+  }
+
+  function fetchSectionLines(fileId, sectionNo) {
+    const key = String(fileId) + ':' + sectionNo;
+    if (!diffContextCache.has(key)) {
+      diffContextCache.set(
+        key,
+        fetch(`/api/files/${encodeURIComponent(fileId)}/context?section=${sectionNo}`)
+          .then(r => (r.ok ? r.json() : null))
+          .then(payload => {
+            if (!payload || typeof payload.content !== 'string') return null;
+            const lines = payload.content.split('\n');
+            if (lines.length && lines[lines.length - 1] === '') lines.pop();
+            return lines;
+          })
+          .catch(() => null)
+      );
+    }
+    return diffContextCache.get(key);
+  }
+
+  // Builds the gap element before hunk `gapIdx` (== hunks.length for the
+  // tail gap after the last hunk). Returns null when there is nothing to
+  // expand there. Boundary/offset arithmetic is in new-side coordinates;
+  // old-side numbers differ by a constant per gap (no changes inside a gap).
+  function buildDiffGap(section, sectionNo, gapIdx) {
+    if (section.deleted) return null;
+    const hunks = section.hunks;
+    const prev = gapIdx > 0 ? hunks[gapIdx - 1] : null;
+    const next = gapIdx < hunks.length ? hunks[gapIdx] : null;
+    const prevEnd = prev ? prev.newStart + prev.newCount - 1 : 0;
+    if (next && next.newStart - prevEnd - 1 <= 0) return null;
+    if (!next && !prev) return null;
+    const oldOffset = next
+      ? next.oldStart - next.newStart
+      : (prev.oldStart + prev.oldCount) - (prev.newStart + prev.newCount);
+
+    const gapEl = document.createElement('div');
+    gapEl.className = 'diff-gap';
+    gapEl.dataset.section = String(sectionNo);
+    gapEl.dataset.gap = String(gapIdx);
+    gapEl.dataset.prevEnd = String(prevEnd);
+    gapEl.dataset.nextStart = next ? String(next.newStart) : '';
+    gapEl.dataset.oldOffset = String(oldOffset);
+    gapEl.dataset.lang = section.lang || '';
+    gapEl.innerHTML = '<div class="dg-rows dg-rows-top"></div>'
+      + '<div class="dg-controls"></div>'
+      + '<div class="dg-rows dg-rows-bottom"></div>';
+    setGapControls(gapEl, next ? next.newStart - prevEnd - 1 : null, gapIdx);
+
+    // Re-render surviving expansions (view toggles / file switches rebuild
+    // the DOM but keep the diffExpansions model).
+    const key = String(activeFileId) + ':' + sectionNo + ':' + gapIdx;
+    if (diffExpansions.has(key)) {
+      const fileId = activeFileId;
+      fetchSectionLines(fileId, sectionNo).then(lines => {
+        if (!gapEl.isConnected || fileId !== activeFileId) return;
+        if (lines) { renderGap(gapEl, lines); scheduleReposition(); }
+        else gapEl.remove();
+      });
+    }
+    return gapEl;
+  }
+
+  function setGapControls(gapEl, remaining, gapIdx) {
+    const controls = gapEl.querySelector('.dg-controls');
+    controls.innerHTML = '';
+    // remaining === null: tail gap before the file length is known.
+    if (remaining !== null && remaining <= 0) {
+      controls.hidden = true;
+      return;
+    }
+    controls.hidden = false;
+    const mkBtn = (dir, label) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'dg-btn';
+      btn.dataset.dir = dir;
+      btn.textContent = label;
+      controls.appendChild(btn);
+    };
+    if (remaining !== null && remaining <= DIFF_CTX_STEP) {
+      mkBtn('all', `↕ Expand ${remaining} line${remaining === 1 ? '' : 's'}`);
+      return;
+    }
+    const isTail = gapEl.dataset.nextStart === '';
+    if (gapIdx > 0) mkBtn('down', `↓ Expand ${DIFF_CTX_STEP}`);
+    if (!isTail) mkBtn('up', `↑ Expand ${DIFF_CTX_STEP}`);
+  }
+
+  function gapBounds(gapEl, lines) {
+    const prevEnd = parseInt(gapEl.dataset.prevEnd, 10);
+    const nextStart = gapEl.dataset.nextStart === ''
+      ? lines.length + 1
+      : parseInt(gapEl.dataset.nextStart, 10);
+    return { prevEnd, nextStart, len: Math.max(0, nextStart - prevEnd - 1) };
+  }
+
+  async function expandGap(gapEl, dir) {
+    const fileId = activeFileId;
+    const sectionNo = parseInt(gapEl.dataset.section, 10);
+    const gapIdx = parseInt(gapEl.dataset.gap, 10);
+    const lines = await fetchSectionLines(fileId, sectionNo);
+    if (fileId !== activeFileId) return;
+    if (!lines) {
+      // Context unavailable (deleted file, foreign .patch, …) — drop every
+      // expander for this section rather than failing on each click.
+      document
+        .querySelectorAll(`#doc-content .diff-gap[data-section="${sectionNo}"]`)
+        .forEach(el => el.remove());
+      return;
+    }
+    const key = fileId + ':' + sectionNo + ':' + gapIdx;
+    const cur = diffExpansions.get(key) || { top: 0, bottom: 0 };
+    const bounds = gapBounds(gapEl, lines);
+    const remaining = bounds.len - cur.top - cur.bottom;
+    if (dir === 'all' || remaining <= DIFF_CTX_STEP) {
+      cur.top = bounds.len - cur.bottom;
+    } else if (dir === 'down') {
+      cur.top += DIFF_CTX_STEP;
+    } else {
+      cur.bottom += DIFF_CTX_STEP;
+    }
+    diffExpansions.set(key, cur);
+    renderGap(gapEl, lines);
+    scheduleReposition();
+  }
+
+  function renderGap(gapEl, lines) {
+    const sectionNo = parseInt(gapEl.dataset.section, 10);
+    const gapIdx = parseInt(gapEl.dataset.gap, 10);
+    const oldOffset = parseInt(gapEl.dataset.oldOffset, 10);
+    const bounds = gapBounds(gapEl, lines);
+    const key = String(activeFileId) + ':' + sectionNo + ':' + gapIdx;
+    const cur = diffExpansions.get(key) || { top: 0, bottom: 0 };
+    const top = Math.min(cur.top, bounds.len);
+    const bottom = Math.min(cur.bottom, bounds.len - top);
+
+    const topHost = gapEl.querySelector('.dg-rows-top');
+    const bottomHost = gapEl.querySelector('.dg-rows-bottom');
+    topHost.innerHTML = '';
+    bottomHost.innerHTML = '';
+    for (let n = bounds.prevEnd + 1; n <= bounds.prevEnd + top; n++) {
+      topHost.appendChild(buildGapRow(n, oldOffset, lines[n - 1] ?? ''));
+    }
+    for (let n = bounds.nextStart - bottom; n <= bounds.nextStart - 1; n++) {
+      bottomHost.appendChild(buildGapRow(n, oldOffset, lines[n - 1] ?? ''));
+    }
+    setGapControls(gapEl, bounds.len - top - bottom, gapIdx);
+    highlightDiffCode(gapEl, gapEl.dataset.lang || null);
+  }
+
+  function buildGapRow(newLineNo, oldOffset, text) {
+    const row = document.createElement('div');
+    row.className = 'dh-row ctx dg-ctx';
+    row.appendChild(buildNumCell('old', newLineNo + oldOffset));
+    row.appendChild(buildNumCell('new', newLineNo));
+    const cell = document.createElement('span');
+    cell.className = 'dh-text';
+    const code = document.createElement('code');
+    code.textContent = text;
+    cell.appendChild(code);
+    row.appendChild(cell);
+    return row;
+  }
+
+  // Capture phase so the whole-block click dispatcher never sees expander
+  // clicks; every other click inside a gap is inert (view-only rows).
+  document.addEventListener('click', (event) => {
+    const btn = event.target.closest && event.target.closest('.diff-gap .dg-btn');
+    if (!btn) return;
+    event.preventDefault();
+    event.stopPropagation();
+    expandGap(btn.closest('.diff-gap'), btn.dataset.dir);
+  }, true);
+
+  // Per-cell syntax highlighting through Prism's string API. Never use
+  // Prism.highlightElement here — it fires the 'complete' hook, which
+  // re-runs renderMarkers and would loop. Escape-first: rows are built with
+  // textContent, so a missing grammar just means plain readable text.
+  function highlightDiffCode(root, lang) {
+    if (!window.Prism || !lang) return;
+    const apply = () => {
+      const grammar = Prism.languages[lang];
+      if (!grammar) return;
+      root.querySelectorAll('.diff-hunk .dh-text > code, .diff-hunk .dh-cell > code, .diff-gap .dh-text > code').forEach(code => {
+        const text = code.textContent;
+        if (!text) return;
+        code.innerHTML = Prism.highlight(text, grammar, lang);
+      });
+      scheduleReposition();
+    };
+    if (Prism.languages[lang]) { apply(); return; }
+    const autoloader = Prism.plugins && Prism.plugins.autoloader;
+    if (autoloader && typeof autoloader.loadLanguages === 'function') {
+      autoloader.loadLanguages(lang, apply);
+    }
+  }
 
   // ---------- File sidebar (multi-file sessions) ----------
   function initFileSidebar() {
@@ -2791,12 +3477,16 @@
   function switchToFile(fileId) {
     const id = String(fileId);
     if (id === activeFileId) return;
-    if (!renderedFileHtml.has(id)) return;
+    if (!renderedFileHtml.has(id) && !diffDataByFile.has(id)) return;
     const doc = document.getElementById('doc-content');
     if (!doc) return;
     if (typeof closeNewThreadEditor === 'function' && newThreadEditor) closeNewThreadEditor();
     activeFileId = id;
-    doc.innerHTML = renderedFileHtml.get(id);
+    if (diffDataByFile.has(id)) {
+      renderDiffFile(id);
+    } else {
+      doc.innerHTML = renderedFileHtml.get(id);
+    }
     wrapCollapsibleSectionsDom();
     assignAnchorIndices();
     buildHeadingMinimap();
@@ -2806,6 +3496,7 @@
     const workspace = document.querySelector('.workspace');
     if (workspace) workspace.scrollTo({ top: 0 });
     updateFileSidebar();
+    updateDiffViewToggle();
     scheduleReposition();
     setTimeout(scheduleReposition, 600);
   }
@@ -2925,6 +3616,48 @@
   function getAnchorElByIdx(idx) {
     return document.querySelector(`#doc-content [data-anchor-idx="${idx}"]`);
   }
+  // ---------- Line-level anchoring helpers ----------
+  // Thread lineRange coordinates are hunk-/block-local line numbers. Two DOM
+  // shapes expose them: Prism <pre> blocks (one .line-numbers-rows span per
+  // line, index = line - 1) and structured .diff-hunk blocks (elements with
+  // data-line attributes). All line-anchoring code paths go through these
+  // helpers instead of touching either DOM shape directly.
+  function diffHunkFor(anchorEl) {
+    return anchorEl && anchorEl.classList && anchorEl.classList.contains('diff-hunk')
+      ? anchorEl
+      : null;
+  }
+  // Every element carrying line n's data-line (row + gutter cells in a
+  // diff hunk; the single gutter span in a Prism pre). Class toggles go here.
+  function blockLineEls(anchorEl, n) {
+    if (!anchorEl) return [];
+    const hunk = diffHunkFor(anchorEl);
+    if (hunk) return Array.from(hunk.querySelectorAll(`[data-line="${n}"]`));
+    const pre = anchorEl.tagName === 'PRE' ? anchorEl : anchorEl.querySelector('pre');
+    const rows = pre && pre.querySelector('.line-numbers-rows');
+    const row = rows && rows.children[n - 1];
+    return row ? [row] : [];
+  }
+  // The single element used for vertical positioning of markers/editors.
+  function blockLineAnchorEl(anchorEl, n) {
+    if (!anchorEl) return null;
+    const hunk = diffHunkFor(anchorEl);
+    if (hunk) {
+      const el = hunk.querySelector(`[data-line="${n}"]`);
+      return el ? (el.closest('.dh-row, .dh-srow') || el) : null;
+    }
+    return blockLineEls(anchorEl, n)[0] || null;
+  }
+  function markLineRange(anchorEl, start, end, cls) {
+    let marked = false;
+    for (let i = start; i <= end; i++) {
+      blockLineEls(anchorEl, i).forEach(el => {
+        el.classList.add(cls);
+        marked = true;
+      });
+    }
+    return marked;
+  }
   function elementLineSpan(el) {
     if (!el) return [NaN, NaN];
     const idx = parseInt(el.getAttribute('data-anchor-idx'));
@@ -2938,6 +3671,24 @@
     if (!el) return '';
     const clone = el.cloneNode(true);
     clone.querySelectorAll('.thread-marker, .thread-marker-stack').forEach(n => n.remove());
+    // Diff hunks render one element per line with no newlines in textContent;
+    // rebuild the text by logical line so snippets keep their separators and
+    // stay identical in unified and split views (split renders context lines
+    // twice, and .empty filler cells carry no data-line).
+    if (diffHunkFor(el)) {
+      const byLine = new Map();
+      clone.querySelectorAll('.dh-row[data-line], .dh-cell[data-line]').forEach(node => {
+        const n = parseInt(node.getAttribute('data-line'), 10);
+        if (!Number.isFinite(n) || byLine.has(n)) return;
+        const cell = node.classList.contains('dh-cell') ? node : node.querySelector('.dh-text');
+        byLine.set(n, cell ? (cell.textContent || '') : '');
+      });
+      return Array.from(byLine.keys())
+        .sort((a, b) => a - b)
+        .map(n => byLine.get(n))
+        .join('\n')
+        .trim();
+    }
     return (clone.textContent || '').trim();
   }
   function snippetOfAnchor(anchorEl) {
@@ -3459,23 +4210,18 @@
   function syncThreadActiveAnchors() {
     document.querySelectorAll('#doc-content [data-anchor-idx].thread-active')
       .forEach(el => el.classList.remove('thread-active'));
-    document.querySelectorAll('.line-numbers-rows > span.thread-active-line')
-      .forEach(span => span.classList.remove('thread-active-line'));
+    document.querySelectorAll('.line-numbers-rows > span.thread-active-line, .diff-hunk .thread-active-line')
+      .forEach(el => el.classList.remove('thread-active-line'));
     document.querySelectorAll('.thread.open').forEach(thread => {
       const start = parseInt(thread.getAttribute('data-anchor-start'));
       const end = parseInt(thread.getAttribute('data-anchor-end'));
       const lineStart = parseInt(thread.getAttribute('data-line-start'));
       const lineEnd = parseInt(thread.getAttribute('data-line-end'));
       // For line-anchored threads on a single code block, highlight only the
-      // affected gutter rows instead of painting the whole <pre>.
+      // affected line rows instead of painting the whole block.
       if (start === end && Number.isFinite(lineStart) && Number.isFinite(lineEnd)) {
         const anchor = getAnchorElByIdx(start);
-        const pre = anchor && (anchor.tagName === 'PRE' ? anchor : anchor.querySelector('pre'));
-        const rows = pre && pre.querySelector('.line-numbers-rows');
-        if (rows) {
-          for (let i = lineStart - 1; i < lineEnd && i < rows.children.length; i++) {
-            rows.children[i].classList.add('thread-active-line');
-          }
+        if (anchor && markLineRange(anchor, lineStart, lineEnd, 'thread-active-line')) {
           return;
         }
       }
@@ -3615,8 +4361,6 @@
     byIdx.forEach((list, idx) => {
       const anchor = getAnchorElByIdx(idx);
       if (!anchor) return;
-      const pre = anchor.tagName === 'PRE' ? anchor : anchor.querySelector('pre');
-      const rows = pre && pre.querySelector('.line-numbers-rows');
       let stack = null;
       list.forEach(thread => {
         const tid = thread.getAttribute('data-thread-id');
@@ -3632,7 +4376,7 @@
         marker.textContent = resolved ? '✓' : (data && data.index != null ? data.index : '•');
         const userThread = userThreadById.get(tid);
         const lineRange = userThread && userThread.lineRange;
-        const row = lineRange && rows ? rows.children[lineRange.start - 1] : null;
+        const row = lineRange ? blockLineAnchorEl(anchor, lineRange.start) : null;
         if (row) {
           // Position the marker next to its anchored line in the gutter.
           const wrapperRect = anchor.getBoundingClientRect();
@@ -3699,11 +4443,7 @@
         && activeNewThreadDraft.anchorStart === anchorStart
         && activeNewThreadDraft.anchorEnd === anchorEnd
       ) ? activeNewThreadDraft.lineRange : null;
-      const pre = lineRange
-        ? (anchor.tagName === 'PRE' ? anchor : anchor.querySelector('pre'))
-        : null;
-      const rows = pre && pre.querySelector('.line-numbers-rows');
-      const row = lineRange && rows ? rows.children[lineRange.start - 1] : null;
+      const row = lineRange ? blockLineAnchorEl(anchor, lineRange.start) : null;
       if (row) {
         const wrapperRect = anchor.getBoundingClientRect();
         const rowRect = row.getBoundingClientRect();
@@ -3733,28 +4473,22 @@
 
   function renderLineRangeIndicators(state) {
     document
-      .querySelectorAll('.line-numbers-rows > span.has-thread-line')
-      .forEach(span => {
-        span.classList.remove('has-thread-line', 'thread-resolved-line');
+      .querySelectorAll('.line-numbers-rows > span.has-thread-line, .diff-hunk .has-thread-line')
+      .forEach(el => {
+        el.classList.remove('has-thread-line', 'thread-resolved-line');
       });
     const userThreads = Array.isArray(state.userThreads) ? state.userThreads : [];
     userThreads.forEach(thread => {
       if (!thread.lineRange) return;
       const anchorEl = getAnchorElByIdx(thread.anchorStart);
       if (!anchorEl) return;
-      const pre = anchorEl.tagName === 'PRE' ? anchorEl : anchorEl.querySelector('pre');
-      if (!pre) return;
-      const rows = pre.querySelector('.line-numbers-rows');
-      if (!rows) return;
-      const spans = rows.children;
       const resolved = !!(state.resolutions && state.resolutions[thread.id]);
-      const startIdx = Math.max(0, thread.lineRange.start - 1);
-      const endIdx = Math.min(spans.length, thread.lineRange.end);
-      for (let i = startIdx; i < endIdx; i++) {
-        const span = spans[i];
-        if (!span) continue;
-        span.classList.add('has-thread-line');
-        if (resolved) span.classList.add('thread-resolved-line');
+      const start = Math.max(1, thread.lineRange.start);
+      for (let i = start; i <= thread.lineRange.end; i++) {
+        blockLineEls(anchorEl, i).forEach(el => {
+          el.classList.add('has-thread-line');
+          if (resolved) el.classList.add('thread-resolved-line');
+        });
       }
     });
   }
@@ -3865,9 +4599,7 @@
     if (!anchor) return null;
     const lineStart = parseInt(threadEl.getAttribute('data-line-start'));
     if (Number.isFinite(lineStart)) {
-      const pre = anchor.tagName === 'PRE' ? anchor : anchor.querySelector('pre');
-      const rows = pre && pre.querySelector('.line-numbers-rows');
-      const row = rows && rows.children[lineStart - 1];
+      const row = blockLineAnchorEl(anchor, lineStart);
       if (row) return row.getBoundingClientRect().top - paneRightRect.top;
     }
     return anchor.getBoundingClientRect().top - paneRightRect.top;
@@ -3918,7 +4650,7 @@
     activeNewThreadDraft = null;
     document.querySelectorAll('#doc-content [data-anchor-idx].focused').forEach(el => el.classList.remove('focused'));
     document.querySelectorAll('#doc-content [data-anchor-idx].in-range').forEach(el => el.classList.remove('in-range'));
-    document.querySelectorAll('.line-numbers-rows > span.draft-active-line').forEach(span => span.classList.remove('draft-active-line'));
+    document.querySelectorAll('.line-numbers-rows > span.draft-active-line, .diff-hunk .draft-active-line').forEach(el => el.classList.remove('draft-active-line'));
     // Re-render markers so a newly-stashed draft shows a teal marker in
     // the gutter, or a just-cleared draft disappears.
     if (hadEditor) renderMarkers();
@@ -3928,17 +4660,11 @@
     closeNewThreadEditor();
     const lineRange = options && options.lineRange ? options.lineRange : null;
     if (lineRange) {
-      // Line-range draft: highlight only the affected gutter rows, not the
-      // whole code block. The .pre-wrap anchor stays clean of .focused so the
-      // big blue outline doesn't cover the whole pre.
+      // Line-range draft: highlight only the affected line rows, not the
+      // whole code block. The block anchor stays clean of .focused so the
+      // big blue outline doesn't cover the whole block.
       const wrapper = getAnchorElByIdx(startIdx);
-      const pre = wrapper && (wrapper.tagName === 'PRE' ? wrapper : wrapper.querySelector('pre'));
-      const rows = pre && pre.querySelector('.line-numbers-rows');
-      if (rows) {
-        for (let i = lineRange.start - 1; i < lineRange.end && i < rows.children.length; i++) {
-          rows.children[i].classList.add('draft-active-line');
-        }
-      }
+      if (wrapper) markLineRange(wrapper, lineRange.start, lineRange.end, 'draft-active-line');
     } else {
       for (let i = startIdx; i <= endIdx; i++) {
         const el = getAnchorElByIdx(i);
@@ -3983,9 +4709,7 @@
     // than at the top of the whole code block.
     let top;
     if (lineRange) {
-      const pre = anchorEl.tagName === 'PRE' ? anchorEl : anchorEl.querySelector('pre');
-      const rows = pre && pre.querySelector('.line-numbers-rows');
-      const row = rows && rows.children[lineRange.start - 1];
+      const row = blockLineAnchorEl(anchorEl, lineRange.start);
       top = row
         ? row.getBoundingClientRect().top - paneRightRect.top
         : anchorEl.getBoundingClientRect().top - paneRightRect.top;
@@ -4190,6 +4914,25 @@
 
   function lineRangeWithinPre(range, startAnchor, endAnchor) {
     if (!startAnchor || startAnchor !== endAnchor) return null;
+    // Structured diff hunks stamp every line's elements with data-line, so
+    // the selection endpoints resolve by ancestor lookup instead of counting
+    // newlines. Endpoints outside any data-line element (e.g. expanded
+    // context rows) yield null → the comment falls back to the whole block.
+    if (diffHunkFor(startAnchor)) {
+      const lineAt = (node) => {
+        while (node && node !== startAnchor) {
+          if (node.nodeType === 1 && node.hasAttribute && node.hasAttribute('data-line')) {
+            return parseInt(node.getAttribute('data-line'));
+          }
+          node = node.parentNode;
+        }
+        return NaN;
+      };
+      const a = lineAt(range.startContainer);
+      const b = lineAt(range.endContainer);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+      return { start: Math.min(a, b), end: Math.max(a, b) };
+    }
     // Comrak wraps <pre> in <div class="pre-wrap" data-anchor-idx="N"> — that
     // wrapper is what closestAnchor returns. Walk down to the actual <pre>.
     const pre = startAnchor.tagName === 'PRE'
@@ -4287,6 +5030,9 @@
     if (e.target.closest('#divider')) return;
     if (e.target.closest('#selection-popup')) return;
     if (e.target.closest('#toast-host')) return;
+    // Expanded context rows are view-only; clicks inside a gap are inert
+    // (expander buttons are handled in a capture-phase listener).
+    if (e.target.closest('.diff-gap')) return;
 
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && sel.toString().trim()) return;
@@ -4641,6 +5387,27 @@
     });
   }, true);
 
+  // Structured diff hunks: a click on a line-number cell opens a one-line
+  // thread, mirroring the Prism gutter-row handler above. Capture phase for
+  // the same reason — preempt the whole-block click handler. The cell itself
+  // carries data-line in split view; in unified the enclosing row does.
+  document.addEventListener('click', (event) => {
+    const num = event.target.closest && event.target.closest('.diff-hunk .dh-num');
+    if (!num || num.classList.contains('empty')) return;
+    const lineEl = num.closest('[data-line]');
+    const wrapper = num.closest('[data-anchor-idx]');
+    if (!lineEl || !wrapper) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const blockIdx = parseInt(wrapper.getAttribute('data-anchor-idx'));
+    const lineNumber = parseInt(lineEl.getAttribute('data-line'));
+    if (!Number.isFinite(blockIdx) || !Number.isFinite(lineNumber) || lineNumber < 1) return;
+    if (!showAllBtn.classList.contains('on')) closeAllThreads();
+    openNewThreadEditor(blockIdx, blockIdx, {
+      lineRange: { start: lineNumber, end: lineNumber },
+    });
+  }, true);
+
   // ---------- Theme toggle ----------
   const THEME_STORAGE_KEY = 'discuss-theme';
   const THEME_MODES = ['system', 'light', 'dark'];
@@ -4769,6 +5536,16 @@
     if (discussFiles.length) activeFileId = String(discussFiles[0].id);
     updateFinishReviewButtonLabel();
     initFileSidebar();
+    // Diff-first sessions arrive with an empty #doc-content — the server
+    // ships the structured model instead of HTML — so render it now and
+    // re-run the load-time passes that already saw the empty document.
+    if (diffDataByFile.has(activeFileId)) {
+      renderDiffFile(activeFileId);
+      wrapCollapsibleSectionsDom();
+      assignAnchorIndices();
+      buildHeadingMinimap();
+    }
+    updateDiffViewToggle();
     highlightCodeBlocks();
     renderAllThreads();
     scheduleReposition();

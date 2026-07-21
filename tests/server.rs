@@ -2603,9 +2603,14 @@ async fn get_root_seeds_rendered_files_and_file_metadata_for_multi_file_sessions
     assert!(body.contains("window.__DISCUSS_RENDERED_FILES__ = "));
     assert!(body.contains(r#"{"id":"f-1","html":"#));
     assert!(body.contains(r#"{"id":"f-2","html":"#));
-    assert!(body.contains(r#"{"id":"f-3","html":"#));
-    // Diff files render as per-hunk diff-<lang> fenced blocks.
-    assert!(body.contains("language-diff-rust"));
+    // Diff files seed a structured model instead of rendered HTML; the
+    // client renders unified/split views from it.
+    assert!(body.contains(r#"{"id":"f-3","diff":{"sections":"#));
+    assert!(body.contains(r#""path":"code.rs""#));
+    assert!(body.contains(r#""lang":"rust""#));
+    assert!(body.contains(r#""oldStart":1"#));
+    assert!(body.contains(r#""kind":"del","old":1"#));
+    assert!(!body.contains("language-diff-rust"));
     // Initial state carries file metadata (no content) for the sidebar.
     assert!(body.contains(r#"\"files\":"#) || body.contains(r#""files":"#));
     assert!(body.contains(r#""path":"beta.md"#));
@@ -2761,6 +2766,132 @@ async fn post_api_source_scopes_coverage_and_payload_to_the_updated_file() {
         "response: {uncovered}"
     );
     assert!(uncovered.contains("must cover every active thread on file f-2"));
+
+    shutdown_tx.send(()).expect("send shutdown signal");
+    timeout(Duration::from_secs(1), server)
+        .await
+        .expect("server exits within timeout")
+        .expect("server task should not panic")
+        .expect("server shutdown should succeed");
+}
+
+#[tokio::test]
+async fn post_api_source_on_diff_file_returns_structured_diff_and_preserves_line_range() {
+    let addr = free_loopback_addr();
+    let app_state = AppState::for_process().with_source(multi_file_source());
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let server = tokio::spawn(serve(addr, app_state, async move {
+        let _ = shutdown_rx.await;
+    }));
+
+    wait_for_server(addr).await;
+
+    let created = post_json_path(
+        addr,
+        "/api/threads",
+        r#"{"fileId":"f-3","anchorStart":3,"anchorEnd":3,"snippet":"fn old() {}","text":"why rename?","lineRange":{"start":2,"end":2}}"#,
+    )
+    .await;
+    assert!(created.starts_with("HTTP/1.1 200"), "response: {created}");
+    let thread_id = response_json(&created)["id"].as_str().unwrap().to_string();
+
+    let updated_diff = "diff --git a/code.rs b/code.rs\nindex 111..222 100644\n--- a/code.rs\n+++ b/code.rs\n@@ -1,2 +1,2 @@\n context\n-fn old() {}\n+fn new_name() {}\n";
+    let updated = post_json_path(
+        addr,
+        "/api/source",
+        &json!({
+            "fileId": "f-3",
+            "markdown": updated_diff,
+            "threadAnchors": [{
+                "threadId": thread_id,
+                "anchorStart": 3,
+                "anchorEnd": 3,
+                "lineRange": { "start": 3, "end": 3 }
+            }]
+        })
+        .to_string(),
+    )
+    .await;
+    assert!(updated.starts_with("HTTP/1.1 200"), "response: {updated}");
+    let payload = response_json(&updated);
+    assert_eq!(payload["fileId"], "f-3");
+    // Diff files carry the structured model; renderedHtml stays an empty
+    // string so existing consumers that type-check it don't break.
+    assert_eq!(payload["renderedHtml"], "");
+    let hunk = &payload["diff"]["sections"][0]["hunks"][0];
+    assert_eq!(hunk["header"], "@@ -1,2 +1,2 @@");
+    assert_eq!(hunk["lines"][1]["kind"], "del");
+    // The broadcast anchors carry the final lineRange so SSE clients can
+    // update their state mirror without rehydrating.
+    assert_eq!(
+        payload["threadAnchors"][0]["lineRange"],
+        json!({ "start": 3, "end": 3 })
+    );
+
+    let state = response_json(&get_path(addr, "/api/state").await);
+    let thread = state["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|thread| thread["id"] == thread_id.as_str())
+        .expect("thread survives the source update");
+    assert_eq!(thread["lineRange"], json!({ "start": 3, "end": 3 }));
+
+    shutdown_tx.send(()).expect("send shutdown signal");
+    timeout(Duration::from_secs(1), server)
+        .await
+        .expect("server exits within timeout")
+        .expect("server task should not panic")
+        .expect("server shutdown should succeed");
+}
+
+// Happy-path content reads are covered by the read_new_side unit tests in
+// src/diff.rs (scratch git repos): resolving a blob through HTTP here would
+// require objects in the repo the *server process* runs in, i.e. mutating
+// the checkout's object database. These tests pin the error contract.
+#[tokio::test]
+async fn get_api_file_context_returns_structured_errors() {
+    let addr = free_loopback_addr();
+    let app_state = AppState::for_process().with_source(multi_file_source());
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let server = tokio::spawn(serve(addr, app_state, async move {
+        let _ = shutdown_rx.await;
+    }));
+
+    wait_for_server(addr).await;
+
+    // Markdown files have no diff context.
+    let markdown = get_path(addr, "/api/files/f-1/context").await;
+    assert!(markdown.starts_with("HTTP/1.1 404"), "response: {markdown}");
+    assert!(markdown.contains("context_unavailable"));
+
+    // Unknown file id.
+    let unknown = get_path(addr, "/api/files/f-99/context").await;
+    assert!(unknown.starts_with("HTTP/1.1 404"), "response: {unknown}");
+    assert!(unknown.contains("unknown_file"));
+
+    // Section out of range / invalid.
+    let bad_section = get_path(addr, "/api/files/f-3/context?section=7").await;
+    assert!(
+        bad_section.starts_with("HTTP/1.1 404"),
+        "response: {bad_section}"
+    );
+    assert!(bad_section.contains("context_unavailable"));
+    let zero_section = get_path(addr, "/api/files/f-3/context?section=0").await;
+    assert!(
+        zero_section.starts_with("HTTP/1.1 400"),
+        "response: {zero_section}"
+    );
+    assert!(zero_section.contains("validation_error"));
+
+    // f-3's diff carries a fake blob hash that resolves nowhere, and no
+    // matching working-tree file exists — graceful 404, not a 500.
+    let missing_blob = get_path(addr, "/api/files/f-3/context").await;
+    assert!(
+        missing_blob.starts_with("HTTP/1.1 404"),
+        "response: {missing_blob}"
+    );
+    assert!(missing_blob.contains("context_unavailable"));
 
     shutdown_tx.send(()).expect("send shutdown signal");
     timeout(Duration::from_secs(1), server)

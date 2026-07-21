@@ -11,6 +11,7 @@ use axum::Json;
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::Path;
+use axum::extract::Query;
 use axum::extract::State as AxumState;
 use axum::extract::rejection::JsonRejection;
 use axum::http::Request;
@@ -76,7 +77,11 @@ struct ThreadAnchorUpdate {
 struct SourceUpdatedPayload {
     markdown: String,
     file_id: FileId,
+    /// Rendered HTML for markdown files; empty for diff files, which ship
+    /// their structured model in `diff` instead.
     rendered_html: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diff: Option<crate::diff::DiffData>,
     thread_anchors: Vec<ThreadAnchorResponse>,
     orphaned_thread_ids: Vec<ThreadId>,
     source_version: u64,
@@ -88,6 +93,10 @@ struct ThreadAnchorResponse {
     thread_id: ThreadId,
     anchor_start: usize,
     anchor_end: usize,
+    /// Final stored lineRange after the update (a source update replaces it
+    /// wholesale), so SSE clients can update state without rehydrating.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line_range: Option<LineRange>,
     orphaned: bool,
 }
 
@@ -523,6 +532,7 @@ fn build_router(app_state: AppState) -> Router {
             post(post_api_drafts_followup).delete(delete_api_drafts_followup),
         )
         .route("/api/source", post(post_api_source))
+        .route("/api/files/{id}/context", get(get_api_file_context))
         .route("/api/threads", post(post_api_threads))
         .route("/api/threads/{id}", delete(delete_api_thread))
         .route("/api/threads/{id}/replies", post(post_api_thread_replies))
@@ -844,7 +854,7 @@ async fn post_api_source(
     };
     app_state.record_mutation();
 
-    let rendered_html = render_file_html(&updated_file);
+    let (rendered_html, diff) = render_file_payload(&updated_file);
     let thread_anchors = threads
         .iter()
         .filter(|thread| thread.file_id == file_id)
@@ -852,6 +862,7 @@ async fn post_api_source(
             thread_id: thread.id.clone(),
             anchor_start: thread.anchor_start,
             anchor_end: thread.anchor_end,
+            line_range: thread.line_range,
             orphaned: thread.orphaned,
         })
         .collect();
@@ -863,7 +874,8 @@ async fn post_api_source(
     let payload = SourceUpdatedPayload {
         markdown,
         file_id,
-        rendered_html,
+        rendered_html: rendered_html.unwrap_or_default(),
+        diff,
         thread_anchors,
         orphaned_thread_ids,
         source_version,
@@ -1905,17 +1917,23 @@ fn render_root_page(app_state: &AppState) -> std::result::Result<String, String>
     let rendered_files: Vec<RenderedFile> = source
         .files
         .iter()
-        .map(|file| RenderedFile {
-            id: file.id.clone(),
-            html: render_file_html(file),
+        .map(|file| {
+            let (html, diff) = render_file_payload(file);
+            RenderedFile {
+                id: file.id.clone(),
+                html,
+                diff,
+            }
         })
         .collect();
     let rendered_files_json = serde_json::to_string(&rendered_files)
         .map_err(|error| format!("failed to serialize rendered files: {error}"))?;
 
+    // Diff-first sessions inject an empty document; the client renders the
+    // diff synchronously from the inline seed before first paint settles.
     let first_file_html = rendered_files
         .first()
-        .map(|file| file.html.clone())
+        .and_then(|file| file.html.clone())
         .unwrap_or_default();
 
     Ok(template::render_page(
@@ -1929,19 +1947,125 @@ fn render_root_page(app_state: &AppState) -> std::result::Result<String, String>
 #[serde(rename_all = "camelCase")]
 struct RenderedFile {
     id: FileId,
-    html: String,
+    /// Rendered HTML for markdown files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    html: Option<String>,
+    /// Structured diff model for diff files; the browser renders it into
+    /// unified or side-by-side views client-side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diff: Option<crate::diff::DiffData>,
 }
 
-/// Renders one source file to HTML: markdown files through the markdown
-/// renderer directly, diff files through a synthesized markdown document
-/// (heading + one fenced `diff-<lang>` block per hunk).
-fn render_file_html(file: &File) -> String {
+/// Renders one source file into its browser payload: markdown files become
+/// HTML through the markdown renderer; diff files become a structured
+/// `DiffData` model the client renders itself.
+fn render_file_payload(file: &File) -> (Option<String>, Option<crate::diff::DiffData>) {
     match file.kind {
-        FileKind::Markdown => render::render(&file.content),
-        FileKind::Diff => render::render(&crate::diff::diff_content_to_markdown(
-            &file.path,
-            &file.content,
-        )),
+        FileKind::Markdown => (Some(render::render(&file.content)), None),
+        FileKind::Diff => (
+            None,
+            Some(crate::diff::parse_diff(&file.path, &file.content)),
+        ),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct FileContextQuery {
+    #[serde(default)]
+    section: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileContextResponse {
+    file_id: FileId,
+    section: usize,
+    content: String,
+}
+
+/// Whole new-side file content for one diff section, fetched on demand by
+/// the browser's context-expansion UI. Read-only: no broadcast, no stdout
+/// event, no mutation-timestamp update.
+async fn get_api_file_context(
+    AxumState(app_state): AxumState<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<FileContextQuery>,
+) -> Response {
+    let section_no = query.section.unwrap_or(1);
+    let Some(section_idx) = section_no.checked_sub(1) else {
+        return api_error_response(
+            StatusCode::BAD_REQUEST,
+            "validation_error",
+            "section must be >= 1",
+        );
+    };
+
+    let source = match app_state.current_source() {
+        Ok(source) => source,
+        Err(message) => {
+            return api_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                message,
+            );
+        }
+    };
+    let Some(file) = source.files.iter().find(|file| file.id.0 == id) else {
+        return api_error_response(
+            StatusCode::NOT_FOUND,
+            "unknown_file",
+            format!("unknown fileId: {id}"),
+        );
+    };
+    if file.kind != FileKind::Diff {
+        return api_error_response(
+            StatusCode::NOT_FOUND,
+            "context_unavailable",
+            "context expansion is only available for diff files",
+        );
+    }
+
+    let data = crate::diff::parse_diff(&file.path, &file.content);
+    let Some(section) = data.sections.get(section_idx) else {
+        return api_error_response(
+            StatusCode::NOT_FOUND,
+            "context_unavailable",
+            format!("no section {section_no} in file {id}"),
+        );
+    };
+    if section.deleted || section.raw.is_some() {
+        return api_error_response(
+            StatusCode::NOT_FOUND,
+            "context_unavailable",
+            "no new-side content for this section",
+        );
+    }
+
+    let path = section.path.clone();
+    let blob = section.new_blob.clone();
+    let file_id = file.id.clone();
+    match tokio::task::spawn_blocking(move || crate::diff::read_new_side(&path, blob.as_deref()))
+        .await
+    {
+        Ok(Ok(content)) => Json(FileContextResponse {
+            file_id,
+            section: section_no,
+            content,
+        })
+        .into_response(),
+        Ok(Err(error)) => {
+            tracing::warn!(file = %id, section = section_no, %error, "diff context unavailable");
+            api_error_response(
+                StatusCode::NOT_FOUND,
+                "context_unavailable",
+                format!("could not read new-side content: {error}"),
+            )
+        }
+        Err(join_error) => api_error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            format!("context read task failed: {join_error}"),
+        ),
     }
 }
 
