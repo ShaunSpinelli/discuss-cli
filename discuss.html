@@ -796,37 +796,32 @@
   .hm-bar[data-level="2"] { margin-left: 6px; }
   .hm-bar[data-level="3"] { margin-left: 12px; }
   .hm-bar[data-level="4"] { margin-left: 18px; }
+  /* Expanded: each bar becomes a text row carrying the actual heading label. */
+  .hm-label { display: none; }
   .heading-minimap:hover .hm-bar {
-    height: 7px;
-    width: var(--hm-w-expanded, 180px);
-  }
-  .heading-minimap:hover .hm-bar:hover {
-    background: var(--ink);
-    height: 14px;
-    margin-top: -3.5px;
-    margin-bottom: -3.5px;
-    z-index: 1;
-  }
-  .hm-bar.is-active { background: var(--accent); }
-  .heading-minimap:hover .hm-bar.is-active { background: var(--accent); }
-  .heading-minimap:hover .hm-bar.is-active:hover { background: var(--ink); }
-  .hm-tooltip {
-    position: fixed;
-    display: none;
-    background: var(--ink);
-    color: var(--bg);
-    font-size: 12px;
-    line-height: 1.2;
-    padding: 5px 9px;
+    height: auto;
+    width: auto;
+    align-self: stretch;
+    background: transparent;
     border-radius: 4px;
+    padding: 3px 7px;
+    overflow: hidden;
+  }
+  .heading-minimap:hover .hm-label {
+    display: block;
+    font-size: 12px;
+    line-height: 1.3;
+    color: var(--muted);
+    text-align: left;
     white-space: nowrap;
-    pointer-events: none;
-    z-index: 60;
-    max-width: 360px;
     overflow: hidden;
     text-overflow: ellipsis;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
   }
+  .heading-minimap:hover .hm-bar:hover { background: var(--accent-soft); }
+  .heading-minimap:hover .hm-bar:hover .hm-label { color: var(--ink); }
+  .hm-bar.is-active { background: var(--accent); }
+  .heading-minimap:hover .hm-bar.is-active { background: transparent; }
+  .heading-minimap:hover .hm-bar.is-active .hm-label { color: var(--accent); font-weight: 600; }
 
   #doc-content [data-anchor-idx] {
     position: relative;
@@ -3524,20 +3519,11 @@
     nav.className = 'heading-minimap';
     nav.setAttribute('aria-label', 'Document outline');
 
-    const tooltip = document.createElement('span');
-    tooltip.className = 'hm-tooltip';
-    document.body.appendChild(tooltip);
-
     const workspace = document.querySelector('.workspace');
 
-    // Bar widths proportional to heading text length: longest text
-    // anchors to the right edge of the minimap's inner content area;
-    // shorter texts shrink proportionally. Indent (per level) shifts
-    // the bar's start, so width = (target right edge) - (level indent).
-    const longestTextLen = Math.max(...headings.map(h => h.text.length));
-    const containerInnerWidth = 206; // .heading-minimap:hover is 220px wide minus 14px horizontal padding
-    const indentForLevel = lvl => (lvl - 1) * 6;
-
+    // Collapsed, the minimap is a thin rail of level-indented pills; on hover
+    // it expands into a text outline — each bar carries its heading label,
+    // hidden while collapsed and revealed when the rail widens.
     const bars = [];
     headings.forEach(h => {
       const bar = document.createElement('button');
@@ -3545,11 +3531,12 @@
       bar.className = 'hm-bar';
       bar.setAttribute('data-level', String(h.level));
       bar.setAttribute('aria-label', h.text);
-      bar.title = h.text; // accessibility fallback
+      bar.title = h.text; // native tooltip covers ellipsized labels
 
-      const targetRight = (h.text.length / longestTextLen) * containerInnerWidth;
-      const width = Math.max(12, targetRight - indentForLevel(h.level));
-      bar.style.setProperty('--hm-w-expanded', width + 'px');
+      const label = document.createElement('span');
+      label.className = 'hm-label';
+      label.textContent = h.text;
+      bar.appendChild(label);
 
       bar.addEventListener('click', (ev) => {
         ev.preventDefault();
@@ -3561,19 +3548,6 @@
         } else {
           h.el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
-      });
-
-      bar.addEventListener('mouseenter', () => {
-        tooltip.textContent = h.text;
-        const rect = bar.getBoundingClientRect();
-        tooltip.style.display = 'block';
-        // Measure after display so we know height
-        const tipH = tooltip.offsetHeight || 22;
-        tooltip.style.left = (rect.right + 8) + 'px';
-        tooltip.style.top = (rect.top + rect.height / 2 - tipH / 2) + 'px';
-      });
-      bar.addEventListener('mouseleave', () => {
-        tooltip.style.display = 'none';
       });
 
       nav.appendChild(bar);
