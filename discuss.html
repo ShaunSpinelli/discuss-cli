@@ -765,18 +765,16 @@
   .heading-minimap::before {
     content: "";
     position: absolute;
-    inset: -8px -12px;
-    background: rgba(255, 255, 255, 0.32);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    inset: -8px -10px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
     opacity: 0;
     pointer-events: none;
     z-index: -1;
     transition: opacity 0.18s ease;
-    -webkit-mask-image: radial-gradient(ellipse 90% 95% at center, black 40%, rgba(0,0,0,0) 95%);
-    mask-image: radial-gradient(ellipse 90% 95% at center, black 40%, rgba(0,0,0,0) 95%);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
   }
-  html[data-theme="dark"] .heading-minimap::before { background: rgba(40, 40, 40, 0.32); }
   .heading-minimap:hover { width: 220px; }
   .heading-minimap:hover::before { opacity: 1; }
   .hm-bar {
