@@ -115,40 +115,44 @@
     --left-gutter: 44px;
     --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   }
+  /* Dark theme modelled on GitHub Dark (Primer): cool, blue-tinted charcoals
+     with GitHub's blue accent. Diff greens/reds are already GitHub's palette
+     (#3fb950 / #f85149). Discuss-specific callout hues (quote/decision/etc.)
+     are left semantically distinct rather than flattened to GitHub grays. */
   html[data-theme="dark"] {
-    --bg: #1a1a1a;
-    --card: #252525;
-    --ink: #e8e8e6;
-    --muted: #a8a8a4;
-    --accent: #5a9bff;
-    --accent-soft: rgba(90, 155, 255, 0.18);
-    --accent-hover: rgba(90, 155, 255, 0.10);
-    --accent-dashed: rgba(90, 155, 255, 0.45);
-    --accent-range: rgba(90, 155, 255, 0.18);
-    --line: #3a3a38;
-    --line-strong: #4c4c48;
-    --quote: #3a3210;
-    --quote-border: #8a7838;
-    --context: #2a2a28;
-    --decision: #1f3526;
-    --decision-border: #4a8862;
-    --callout: #1a2a3f;
-    --callout-border: #3a6aa8;
-    --user-note: #3a1f29;
+    --bg: #0d1117;
+    --card: #161b22;
+    --ink: #e6edf3;
+    --muted: #8b949e;
+    --accent: #2f81f7;
+    --accent-soft: rgba(47, 129, 247, 0.15);
+    --accent-hover: rgba(47, 129, 247, 0.10);
+    --accent-dashed: rgba(47, 129, 247, 0.40);
+    --accent-range: rgba(47, 129, 247, 0.15);
+    --line: #30363d;
+    --line-strong: #444c56;
+    --quote: #161b22;
+    --quote-border: #3d444d;
+    --context: rgba(110, 118, 129, 0.4);
+    --decision: #12261e;
+    --decision-border: #238636;
+    --callout: #121d2f;
+    --callout-border: #1f6feb;
+    --user-note: #2b1a22;
     --user-note-border: #8a4a5f;
-    --pending: #3a3210;
-    --pending-border: #6a5a30;
-    --pending-dark: #c8a85a;
-    --pre-bg: #2d2d2c;
-    --diff-add-bg: rgba(63, 185, 80, 0.16);
-    --diff-add-num-bg: rgba(63, 185, 80, 0.32);
-    --diff-del-bg: rgba(248, 81, 73, 0.16);
-    --diff-del-num-bg: rgba(248, 81, 73, 0.32);
-    --diff-header-bg: rgba(84, 174, 255, 0.16);
-    --diff-empty-bg: rgba(255, 255, 255, 0.03);
-    --diff-num-ink: #7a7a76;
-    --marker-blue: #5a9bff;
-    --marker-yellow: #f0c860;
+    --pending: #272115;
+    --pending-border: #9e6a03;
+    --pending-dark: #e3b341;
+    --pre-bg: #161b22;
+    --diff-add-bg: rgba(63, 185, 80, 0.15);
+    --diff-add-num-bg: rgba(63, 185, 80, 0.30);
+    --diff-del-bg: rgba(248, 81, 73, 0.15);
+    --diff-del-num-bg: rgba(248, 81, 73, 0.30);
+    --diff-header-bg: rgba(56, 139, 253, 0.15);
+    --diff-empty-bg: rgba(110, 118, 129, 0.08);
+    --diff-num-ink: #6e7681;
+    --marker-blue: #2f81f7;
+    --marker-yellow: #d29922;
     --marker-pink: #e87a9c;
   }
   * { box-sizing: border-box; }
