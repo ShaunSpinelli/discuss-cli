@@ -1316,14 +1316,42 @@
      textContent, selection, and copies stay clean. */
   /* No overflow-x here: thread markers hang outside the block's right edge
      (same reason .pre-wrap exists), and .dh-text wraps long lines instead. */
+  /* A section's hunks and gaps butt together with no margins, so it reads as
+     one continuous block (GitHub-style): expanding a gap grows that block
+     instead of revealing a detached slab of code. Only the stack's outer edges
+     get spacing and rounded corners. Gaps clip themselves to that radius; a
+     hunk can't (it hosts absolutely-positioned thread markers), so its extreme
+     row and that row's end cells are rounded directly — whichever of them
+     paints the corner. */
   #doc-content .diff-hunk {
     position: relative;
-    margin: 10px 0;
+    margin: 0;
     background: var(--pre-bg);
-    border-radius: 4px;
     font-family: var(--mono);
     font-size: 12.5px;
     line-height: 1.45;
+  }
+  #doc-content .diff-section > div:first-of-type { margin-top: 10px; }
+  #doc-content .diff-section > div:last-of-type { margin-bottom: 10px; }
+  #doc-content .diff-section > div:first-of-type,
+  #doc-content .diff-section > div:first-of-type > :first-child,
+  #doc-content .diff-section > div:first-of-type > :first-child > :first-child {
+    border-top-left-radius: 4px;
+  }
+  #doc-content .diff-section > div:first-of-type,
+  #doc-content .diff-section > div:first-of-type > :first-child,
+  #doc-content .diff-section > div:first-of-type > :first-child > :last-child {
+    border-top-right-radius: 4px;
+  }
+  #doc-content .diff-section > div:last-of-type,
+  #doc-content .diff-section > div:last-of-type > :last-child,
+  #doc-content .diff-section > div:last-of-type > :last-child > :first-child {
+    border-bottom-left-radius: 4px;
+  }
+  #doc-content .diff-section > div:last-of-type,
+  #doc-content .diff-section > div:last-of-type > :last-child,
+  #doc-content .diff-section > div:last-of-type > :last-child > :last-child {
+    border-bottom-right-radius: 4px;
   }
   #doc-content .diff-hunk code {
     background: none;
@@ -1440,7 +1468,8 @@
   /* Context-expansion gaps between hunks: revealed rows (view-only — no
      data-line, so never commentable) plus GitHub-style expander buttons. */
   .diff-gap {
-    margin: 2px 0;
+    margin: 0;
+    overflow: hidden; /* safe here (no markers), and clips to the outer radius */
     font-family: var(--mono);
     font-size: 12.5px;
     line-height: 1.45;
@@ -1455,7 +1484,9 @@
   .diff-gap .dg-ctx .dh-num { cursor: default; }
   .diff-gap .dg-ctx .dh-num:hover { background: none; }
   .diff-gap .dg-ctx .dh-num:hover::after { content: none; }
-  .dg-controls { display: flex; gap: 1px; }
+  /* The controls sit flush in the row stack; the 1px flex gap between a
+     paired ↓/↑ shows through as a hairline divider. */
+  .dg-controls { display: flex; gap: 1px; background: var(--line); }
   .dg-controls[hidden] { display: none; }
   .dg-btn {
     flex: 1;
@@ -1466,7 +1497,7 @@
     padding: 3px 8px;
     font: inherit;
     font-size: 12px;
-    border-radius: 3px;
+    border-radius: 0;
   }
   .dg-btn:hover { background: var(--accent-soft); }
 
@@ -3342,18 +3373,27 @@
     highlightDiffCode(gapEl, gapEl.dataset.lang || null);
   }
 
+  // Revealed rows mirror the active view's grid so they line up with the hunk
+  // rows they sit against: unified = one text column, split = the same context
+  // text on both sides (a gap holds no changes, so both sides are identical).
   function buildGapRow(newLineNo, oldOffset, text) {
+    const split = diffViewMode === 'split';
     const row = document.createElement('div');
-    row.className = 'dh-row ctx dg-ctx';
+    row.className = (split ? 'dh-srow' : 'dh-row ctx') + ' dg-ctx';
     row.appendChild(buildNumCell('old', newLineNo + oldOffset));
+    if (split) row.appendChild(buildGapText('dh-cell old', text));
     row.appendChild(buildNumCell('new', newLineNo));
+    row.appendChild(buildGapText(split ? 'dh-cell new' : 'dh-text', text));
+    return row;
+  }
+
+  function buildGapText(className, text) {
     const cell = document.createElement('span');
-    cell.className = 'dh-text';
+    cell.className = className;
     const code = document.createElement('code');
     code.textContent = text;
     cell.appendChild(code);
-    row.appendChild(cell);
-    return row;
+    return cell;
   }
 
   // Capture phase so the whole-block click dispatcher never sees expander
@@ -3375,7 +3415,7 @@
     const apply = () => {
       const grammar = Prism.languages[lang];
       if (!grammar) return;
-      root.querySelectorAll('.diff-hunk .dh-text > code, .diff-hunk .dh-cell > code, .diff-gap .dh-text > code').forEach(code => {
+      root.querySelectorAll('.diff-hunk .dh-text > code, .diff-hunk .dh-cell > code, .diff-gap .dh-text > code, .diff-gap .dh-cell > code').forEach(code => {
         const text = code.textContent;
         if (!text) return;
         code.innerHTML = Prism.highlight(text, grammar, lang);
