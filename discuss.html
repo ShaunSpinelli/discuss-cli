@@ -2128,6 +2128,8 @@
   const SSE_RECONNECT_DELAY_MS = 1000;
   let eventSource = null;
   let eventReconnectTimer = null;
+  let resyncInFlight = false;
+  let queuedEventsDuringResync = null;
 
   function startEventStream() {
     if (reviewComplete) return;
@@ -2142,9 +2144,18 @@
     SSE_EVENT_KINDS.forEach(kind => {
       source.addEventListener(kind, (event) => {
         const payload = parseEventPayload(kind, event);
-        if (payload) applyServerEvent(kind, payload);
+        if (!payload) return;
+        if (queuedEventsDuringResync) {
+          queuedEventsDuringResync.push([kind, payload]);
+          return;
+        }
+        applyServerEvent(kind, payload);
       });
     });
+    // 'open' fires on the first connect and on every reconnect. The stream
+    // carries no replay, so refetch the snapshot to fill whatever a
+    // disconnect gap (or a stale cached page seed) swallowed.
+    source.addEventListener('open', () => { resyncStateFromServer(); });
     source.onerror = () => {
       if (eventSource === source) eventSource = null;
       source.close();
@@ -2159,6 +2170,53 @@
       eventReconnectTimer = null;
       startEventStream();
     }, SSE_RECONNECT_DELAY_MS);
+  }
+
+  // Events arriving while the snapshot fetch is in flight are queued and
+  // replayed after it lands — handlers are idempotent, so replaying an event
+  // the snapshot already contains is safe, and nothing can race the overwrite.
+  async function resyncStateFromServer() {
+    if (reviewComplete || resyncInFlight) return;
+    resyncInFlight = true;
+    queuedEventsDuringResync = [];
+    try {
+      const response = await fetch('/api/state', { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error(`GET /api/state returned ${response.status}`);
+      const fetched = await response.json();
+      const local = loadState();
+      const fetchedVersion = parseInt(fetched.sourceVersion, 10) || 0;
+      if (fetchedVersion !== (local.sourceVersion || 0)) {
+        // A source.updated fell in the gap; this page's doc HTML is stale and
+        // /api/state carries no rendered HTML, so a fresh page is the only
+        // honest recovery.
+        location.reload();
+        return;
+      }
+      // This tab queues its own draft writes, so local drafts stay
+      // authoritative — the fetched snapshot may predate an in-flight save.
+      fetched.drafts = local.drafts;
+      const before = stableStringify(local);
+      const after = setCurrentState(fetched);
+      if (stableStringify(after) !== before) refreshAllThreadsFromState();
+    } catch (error) {
+      console.warn('discuss: state resync failed:', error);
+    } finally {
+      const queued = queuedEventsDuringResync || [];
+      queuedEventsDuringResync = null;
+      resyncInFlight = false;
+      queued.forEach(([kind, payload]) => applyServerEvent(kind, payload));
+    }
+  }
+
+  // Server snapshots serialize HashMaps, so map key order varies per fetch;
+  // sort keys so equal states compare equal and clean reconnects skip the
+  // focus-stealing full re-render.
+  function stableStringify(value) {
+    return JSON.stringify(value, (key, val) =>
+      val && typeof val === 'object' && !Array.isArray(val)
+        ? Object.keys(val).sort().reduce((acc, k) => { acc[k] = val[k]; return acc; }, {})
+        : val
+    );
   }
 
   function parseEventPayload(kind, event) {

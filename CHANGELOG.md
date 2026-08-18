@@ -18,6 +18,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `discuss diff` invokes `git diff` with `--full-index` so context expansion can resolve new-side blobs by full id.
 
+### Fixed
+
+- The browser resyncs review state from `GET /api/state` whenever the SSE stream opens (first connect and every reconnect), so threads, replies, and takes posted while a tab was disconnected — including across a server restart on the same port — appear without a manual refresh. Events arriving mid-resync are queued and replayed. If a `source.updated` fell in the gap, the page reloads instead, since the snapshot cannot repair stale document HTML.
+- `GET /` is served with `Cache-Control: no-store` so a cached page can never revive a stale baked-in state seed.
+
 ## [0.6.0] - 2026-07-09
 
 ### Added

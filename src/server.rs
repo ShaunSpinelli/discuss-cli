@@ -1898,7 +1898,12 @@ async fn get_root(AxumState(app_state): AxumState<AppState>) -> Response {
     match render_root_page(&app_state) {
         Ok(page) => (
             StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                // The page bakes in a state seed; a cached copy would revive
+                // stale threads/takes after a server restart.
+                (header::CACHE_CONTROL, "no-store"),
+            ],
             page,
         )
             .into_response(),

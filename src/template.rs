@@ -452,6 +452,22 @@ mod tests {
     }
 
     #[test]
+    fn bundled_template_resyncs_state_when_the_event_stream_opens() {
+        let page = render_page("<p>Doc</p>", r#"{"threads":[]}"#, "[]");
+
+        // The SSE stream has no replay, so every 'open' (first connect and
+        // each reconnect) refetches the snapshot to fill disconnect gaps.
+        assert!(
+            page.contains("source.addEventListener('open', () => { resyncStateFromServer(); });")
+        );
+        assert!(page.contains("async function resyncStateFromServer()"));
+        assert!(page.contains("queuedEventsDuringResync"));
+        // A missed source.updated leaves stale doc HTML the snapshot cannot
+        // repair; the client reloads on a sourceVersion mismatch instead.
+        assert!(page.contains("location.reload();"));
+    }
+
+    #[test]
     fn bundled_template_renders_agent_take_markdown() {
         let page = render_page("<p>Doc</p>", r#"{"threads":[]}"#, "[]");
 
