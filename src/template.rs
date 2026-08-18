@@ -452,6 +452,24 @@ mod tests {
     }
 
     #[test]
+    fn bundled_template_renders_agent_take_markdown() {
+        let page = render_page("<p>Doc</p>", r#"{"threads":[]}"#, "[]");
+
+        // Takes render through the escape-first client-side markdown subset;
+        // plain user replies stay escaped text.
+        assert!(page.contains("function renderCommentMarkdown(src)"));
+        assert!(
+            page.contains(r#"<div class="comment-md">${renderCommentMarkdown(it.text)}</div>"#)
+        );
+        assert!(page.contains(": escapeHtml(it.text);"));
+        // Comment code blocks highlight via Prism's string API, never
+        // highlightElement (its 'complete' hook would loop renderMarkers).
+        assert!(page.contains("function highlightCommentCode(root)"));
+        assert!(page.contains("highlightCommentCode(list);"));
+        assert!(page.contains("Prism.highlight(code.textContent, grammar, lang)"));
+    }
+
+    #[test]
     fn bundled_template_marks_thread_contributor_state() {
         let page = render_page("<p>Doc</p>", r#"{"threads":[]}"#, "[]");
 

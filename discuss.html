@@ -1145,6 +1145,50 @@
   }
   .user-comment .meta { font-size: 10.5px; color: var(--muted); font-style: italic; margin-top: 3px; }
 
+  /* Agent takes are markdown; .comment-md holds the rendered subset. The
+     parent .user-comment keeps pre-wrap for plain-text user replies, so
+     rendered markdown must reset it. */
+  .comment-md { white-space: normal; overflow-wrap: break-word; }
+  .comment-md p, .comment-md ul, .comment-md ol, .comment-md pre,
+  .comment-md blockquote, .comment-md table, .comment-md hr,
+  .comment-md h1, .comment-md h2, .comment-md h3,
+  .comment-md h4, .comment-md h5, .comment-md h6 { margin: 0; }
+  .comment-md > * + *, .comment-md blockquote > * + * { margin-top: 6px; }
+  .comment-md h1, .comment-md h2, .comment-md h3,
+  .comment-md h4, .comment-md h5, .comment-md h6 { font-size: 13px; font-weight: 700; }
+  .comment-md h1 { font-size: 14px; }
+  .comment-md h2 { font-size: 13.5px; }
+  .comment-md code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--pre-bg);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0 3px;
+  }
+  .comment-md pre {
+    background: var(--pre-bg);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 6px 8px;
+    overflow-x: auto;
+  }
+  .comment-md pre code { border: none; background: none; padding: 0; }
+  .comment-md .md-table-wrap { overflow-x: auto; }
+  .comment-md table { border-collapse: collapse; font-size: 12.5px; }
+  .comment-md th, .comment-md td { border: 1px solid var(--line-strong); padding: 3px 8px; text-align: left; }
+  .comment-md th { background: var(--context); font-weight: 600; }
+  .comment-md blockquote {
+    border-left: 3px solid var(--line-strong);
+    padding: 2px 8px;
+    color: var(--muted);
+  }
+  .comment-md ul, .comment-md ol { padding-left: 20px; }
+  .comment-md li + li { margin-top: 2px; }
+  .comment-md li ul, .comment-md li ol { margin: 2px 0 0; padding-left: 16px; }
+  .comment-md hr { border: none; border-top: 1px solid var(--line); }
+  .comment-md a { color: var(--accent); }
+
   .followup { margin-top: 10px; }
   .followup textarea {
     width: 100%;
@@ -3890,6 +3934,204 @@
     return el;
   }
 
+  // ---------- Comment markdown ----------
+  // Agent takes arrive as raw markdown text over REST/SSE. Render a safe
+  // subset client-side: escape-first, then rebuild known constructs, so
+  // arbitrary HTML in a take never reaches the DOM. Covers fenced code,
+  // tables, lists, blockquotes, headings, rules, and inline
+  // code/bold/italic/strikethrough/links.
+  function renderCommentMarkdown(src) {
+    const lines = String(src == null ? '' : src).replace(/\r\n?/g, '\n').split('\n');
+    const out = [];
+    const para = [];
+    let i = 0;
+
+    const flushPara = () => {
+      if (!para.length) return;
+      out.push('<p>' + para.map(inlineMarkdown).join('<br>') + '</p>');
+      para.length = 0;
+    };
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      const fence = line.match(/^\s{0,3}(`{3,}|~{3,})\s*([\w#+.-]*).*$/);
+      if (fence) {
+        flushPara();
+        const marker = fence[1][0];
+        const minLen = fence[1].length;
+        const lang = fence[2].toLowerCase();
+        const code = [];
+        i++;
+        while (i < lines.length) {
+          const close = lines[i].match(/^\s{0,3}(`{3,}|~{3,})\s*$/);
+          if (close && close[1][0] === marker && close[1].length >= minLen) { i++; break; }
+          code.push(lines[i]);
+          i++;
+        }
+        const cls = lang ? ` class="language-${escapeHtml(lang)}"` : '';
+        out.push(`<pre><code${cls}>${escapeHtml(code.join('\n'))}</code></pre>`);
+        continue;
+      }
+
+      if (!line.trim()) { flushPara(); i++; continue; }
+
+      const heading = line.match(/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/);
+      if (heading) {
+        flushPara();
+        const level = heading[1].length;
+        out.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
+        i++;
+        continue;
+      }
+
+      if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) { flushPara(); out.push('<hr>'); i++; continue; }
+
+      if (/^\s{0,3}>/.test(line)) {
+        flushPara();
+        const inner = [];
+        while (i < lines.length && /^\s{0,3}>/.test(lines[i])) {
+          inner.push(lines[i].replace(/^\s{0,3}>\s?/, ''));
+          i++;
+        }
+        out.push('<blockquote>' + renderCommentMarkdown(inner.join('\n')) + '</blockquote>');
+        continue;
+      }
+
+      if (line.includes('|') && i + 1 < lines.length && isTableDelimiterRow(lines[i + 1])) {
+        flushPara();
+        const header = splitTableRow(line);
+        const aligns = splitTableRow(lines[i + 1]).map(cell => {
+          const left = cell.startsWith(':');
+          const right = cell.endsWith(':');
+          if (left && right) return 'center';
+          return right ? 'right' : '';
+        });
+        i += 2;
+        const rows = [];
+        while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+          rows.push(splitTableRow(lines[i]));
+          i++;
+        }
+        const rowHtml = (tag, cells) => '<tr>' + cells.map((cell, idx) => {
+          const align = aligns[idx] ? ` style="text-align:${aligns[idx]}"` : '';
+          return `<${tag}${align}>${inlineMarkdown(cell)}</${tag}>`;
+        }).join('') + '</tr>';
+        out.push(
+          '<div class="md-table-wrap"><table><thead>' + rowHtml('th', header) + '</thead><tbody>'
+          + rows.map(cells => rowHtml('td', cells)).join('')
+          + '</tbody></table></div>'
+        );
+        continue;
+      }
+
+      const itemRe = /^(\s*)(?:([-*+])|(\d{1,9})[.)])\s+(.*)$/;
+      if (itemRe.test(line)) {
+        flushPara();
+        const items = [];
+        while (i < lines.length) {
+          const m = lines[i].match(itemRe);
+          if (m) {
+            items.push({ indent: m[1].length, ordered: m[3] != null, text: m[4] });
+          } else if (lines[i].trim() && /^\s{2,}/.test(lines[i])) {
+            items[items.length - 1].text += ' ' + lines[i].trim();
+          } else {
+            break;
+          }
+          i++;
+        }
+        out.push(buildCommentList(items));
+        continue;
+      }
+
+      para.push(line);
+      i++;
+    }
+    flushPara();
+    return out.join('');
+  }
+
+  function isTableDelimiterRow(line) {
+    if (!line.includes('|')) return false;
+    const cells = splitTableRow(line);
+    return cells.length > 0 && cells.every(cell => /^:?-+:?$/.test(cell));
+  }
+
+  function splitTableRow(row) {
+    let s = row.trim();
+    if (s.startsWith('|')) s = s.slice(1);
+    if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1);
+    const cells = [];
+    let cur = '';
+    for (let k = 0; k < s.length; k++) {
+      if (s[k] === '\\' && s[k + 1] === '|') { cur += '|'; k++; }
+      else if (s[k] === '|') { cells.push(cur.trim()); cur = ''; }
+      else cur += s[k];
+    }
+    cells.push(cur.trim());
+    return cells;
+  }
+
+  // Nested lists attach inside the previous <li>, keyed off indent width.
+  function buildCommentList(items) {
+    let pos = 0;
+    function build(indent) {
+      const ordered = items[pos].ordered;
+      let html = ordered ? '<ol>' : '<ul>';
+      while (pos < items.length && items[pos].indent >= indent) {
+        if (items[pos].indent > indent) {
+          html = html.slice(0, -'</li>'.length) + build(items[pos].indent) + '</li>';
+        } else {
+          html += '<li>' + inlineMarkdown(items[pos].text) + '</li>';
+          pos++;
+        }
+      }
+      return html + (ordered ? '</ol>' : '</ul>');
+    }
+    let html = '';
+    while (pos < items.length) html += build(items[pos].indent);
+    return html;
+  }
+
+  // Code spans are pulled out before escaping so their content is never
+  // touched by the other inline rules; hrefs are restricted to http(s).
+  function inlineMarkdown(raw) {
+    const codeSpans = [];
+    let s = String(raw).replace(/(`+)([\s\S]*?)\1(?!`)/g, (match, ticks, body) => {
+      codeSpans.push('<code>' + escapeHtml(body.trim()) + '</code>');
+      return '\u0000' + (codeSpans.length - 1) + '\u0000';
+    });
+    s = escapeHtml(s);
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|\W)__([^_]+)__(?=\W|$)/g, '$1<strong>$2</strong>');
+    s = s.replace(/(^|[^*])\*([^*\s](?:[^*]*[^*\s])?)\*(?!\*)/g, '$1<em>$2</em>');
+    s = s.replace(/(^|[^\w_])_([^_\s](?:[^_]*[^_\s])?)_(?![\w_])/g, '$1<em>$2</em>');
+    s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+    return s.replace(/\u0000(\d+)\u0000/g, (match, idx) => codeSpans[idx]);
+  }
+
+  // Prism string API only — highlightElement fires the 'complete' hook,
+  // which re-runs renderMarkers and would loop (see highlightDiffCode).
+  function highlightCommentCode(root) {
+    if (!window.Prism) return;
+    root.querySelectorAll('.comment-md pre > code[class*="language-"]').forEach(code => {
+      const lang = (code.className.match(/language-([\w#+.-]+)/) || [])[1];
+      if (!lang) return;
+      const apply = () => {
+        const grammar = Prism.languages[lang];
+        if (!grammar) return;
+        code.innerHTML = Prism.highlight(code.textContent, grammar, lang);
+      };
+      if (Prism.languages[lang]) { apply(); return; }
+      const autoloader = Prism.plugins && Prism.plugins.autoloader;
+      if (autoloader && typeof autoloader.loadLanguages === 'function') {
+        autoloader.loadLanguages(lang, apply);
+      }
+    });
+  }
+
   function renderFollowups(threadEl, threadId) {
     const list = threadEl.querySelector('.user-comment-list');
     if (!list) return;
@@ -3897,8 +4139,12 @@
     const items = commentsForThread(s, threadId);
     list.innerHTML = items.map(it => {
       const metaPrefix = it.kind === 'take' ? 'Agent take · ' : '';
-      return `<div class="user-comment" data-kind="${escapeHtml(it.kind || 'reply')}">${escapeHtml(it.text)}<div class="meta">${escapeHtml(metaPrefix)}${new Date(it.addedAt).toLocaleString()}</div></div>`;
+      const body = it.kind === 'take'
+        ? `<div class="comment-md">${renderCommentMarkdown(it.text)}</div>`
+        : escapeHtml(it.text);
+      return `<div class="user-comment" data-kind="${escapeHtml(it.kind || 'reply')}">${body}<div class="meta">${escapeHtml(metaPrefix)}${new Date(it.addedAt).toLocaleString()}</div></div>`;
     }).join('');
+    highlightCommentCode(list);
   }
 
   function commentsForThread(state, threadId) {

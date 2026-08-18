@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Context expansion for diff reviews: expander buttons above, between, and below hunks reveal surrounding file lines on demand via the new `GET /api/files/{id}/context` endpoint. Expanded rows are view-only (GitHub behavior), so existing thread anchors never shift.
 - Diff files now ship a structured model (`sections` → `hunks` → `lines`) to the browser instead of pre-rendered HTML; both diff views render client-side from it. Thread anchor semantics (`anchorStart`/`anchorEnd` + hunk-local `lineRange`, line 1 = the `@@` header) are unchanged.
 - `source.updated` payloads for diff files carry the structured `diff` model, and re-anchor responses now include each thread's final `lineRange` so SSE clients update line indicators without rehydrating.
+- Agent takes in comment threads render as markdown: tables, fenced code blocks with Prism syntax highlighting, nested lists, blockquotes, headings, and inline code/bold/italic/strikethrough/links. Rendering is escape-first client-side, so HTML in a take never reaches the DOM and links are restricted to `http(s)`. User notes stay plain text.
 
 ### Changed
 
