@@ -3138,7 +3138,10 @@
         return;
       }
 
-      const buildHunk = diffViewMode === 'split' ? buildSplitHunk : buildUnifiedHunk;
+      // New and deleted files have only one side, so split view would pair
+      // every line with blank filler; render them unified whatever the toggle.
+      const oneSided = section.newFile || section.deleted;
+      const buildHunk = diffViewMode === 'split' && !oneSided ? buildSplitHunk : buildUnifiedHunk;
       const sectionNo = sectionIdx + 1;
       section.hunks.forEach((hunk, hunkIdx) => {
         const gap = buildDiffGap(section, sectionNo, hunkIdx);
@@ -3349,7 +3352,9 @@
   // expand there. Boundary/offset arithmetic is in new-side coordinates;
   // old-side numbers differ by a constant per gap (no changes inside a gap).
   function buildDiffGap(section, sectionNo, gapIdx) {
-    if (section.deleted) return null;
+    // Deleted files have no new side to fetch; a new file's single hunk
+    // already spans the whole file, so there is nothing outside it to reveal.
+    if (section.deleted || section.newFile) return null;
     const hunks = section.hunks;
     const prev = gapIdx > 0 ? hunks[gapIdx - 1] : null;
     const next = gapIdx < hunks.length ? hunks[gapIdx] : null;

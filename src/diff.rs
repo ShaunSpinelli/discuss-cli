@@ -36,6 +36,9 @@ pub struct DiffSection {
     pub lang: Option<&'static str>,
     /// Stats and header-derived notes ("+3 −1", "new file", "renamed to `x`").
     pub notes: Vec<String>,
+    /// New files have no old side; the browser renders them one-sided
+    /// (unified) and skips context gaps, since the lone hunk is the file.
+    pub new_file: bool,
     /// Deleted files have no new side, so context expansion is disabled.
     pub deleted: bool,
     /// New-side blob id from the `index <old>..<new>` header line (full ids
@@ -225,6 +228,7 @@ pub fn parse_diff(fallback_path: &str, content: &str) -> DiffData {
                 path: fallback_path.to_string(),
                 lang: language_for_path(fallback_path),
                 notes: Vec::new(),
+                new_file: false,
                 deleted: false,
                 new_blob: None,
                 hunks: Vec::new(),
@@ -261,10 +265,12 @@ fn parse_section(file: &DiffFile) -> DiffSection {
     if !hunks.is_empty() {
         notes.push(format!("+{additions} −{deletions}"));
     }
+    let mut new_file = false;
     let mut deleted = false;
     for line in header.lines() {
         if line.starts_with("new file mode") {
             notes.push("new file".to_string());
+            new_file = true;
         } else if line.starts_with("deleted file mode") {
             notes.push("deleted file".to_string());
             deleted = true;
@@ -281,6 +287,7 @@ fn parse_section(file: &DiffFile) -> DiffSection {
         path: file.path.clone(),
         lang: language_for_path(&file.path),
         notes,
+        new_file,
         deleted,
         new_blob: if deleted {
             None
@@ -704,10 +711,12 @@ index 1111..2222 100644
         let foo = parse_section(&files[0]);
         assert_eq!(foo.notes, vec!["+1 −1".to_string()]);
         assert_eq!(foo.lang, Some("rust"));
+        assert!(!foo.new_file);
         assert!(!foo.deleted);
 
         let bar = parse_section(&files[1]);
         assert!(bar.notes.contains(&"new file".to_string()));
+        assert!(bar.new_file);
 
         let deleted = "\
 diff --git a/old.rs b/old.rs
@@ -720,6 +729,7 @@ index 1234..0000
 ";
         let section = parse_section(&split_into_files(deleted)[0]);
         assert!(section.deleted);
+        assert!(!section.new_file);
         assert!(section.notes.contains(&"deleted file".to_string()));
         assert_eq!(section.new_blob, None);
 
@@ -867,6 +877,8 @@ Binary files a/img.png and b/img.png differ
         let section = &json["sections"][0];
         assert_eq!(section["path"], "foo.rs");
         assert_eq!(section["lang"], "rust");
+        assert_eq!(section["newFile"], false);
+        assert_eq!(section["deleted"], false);
         let hunk = &section["hunks"][0];
         assert_eq!(hunk["oldStart"], 1);
         assert_eq!(hunk["newCount"], 1);
