@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- GitHub-style side-by-side (split) diff view with a unified ↔ split toggle in the browser header. Sessions open in split view by default; the choice persists as a UI preference (`discuss-diff-view`).
+- Context expansion for diff reviews: expander buttons above, between, and below hunks reveal surrounding file lines on demand via the new `GET /api/files/{id}/context` endpoint. Expanded rows are view-only (GitHub behavior), so existing thread anchors never shift.
+- Diff files now ship a structured model (`sections` → `hunks` → `lines`) to the browser instead of pre-rendered HTML; both diff views render client-side from it. Thread anchor semantics (`anchorStart`/`anchorEnd` + hunk-local `lineRange`, line 1 = the `@@` header) are unchanged.
+- `source.updated` payloads for diff files carry the structured `diff` model, and re-anchor responses now include each thread's final `lineRange` so SSE clients update line indicators without rehydrating.
+- Agent takes in comment threads render as markdown: tables, fenced code blocks with Prism syntax highlighting, nested lists, blockquotes, headings, and inline code/bold/italic/strikethrough/links. Rendering is escape-first client-side, so HTML in a take never reaches the DOM and links are restricted to `http(s)`. User notes stay plain text.
+
+### Changed
+
+- `discuss diff` invokes `git diff` with `--full-index` so context expansion can resolve new-side blobs by full id.
+
+### Fixed
+
+- The browser resyncs review state from `GET /api/state` whenever the SSE stream opens (first connect and every reconnect), so threads, replies, and takes posted while a tab was disconnected — including across a server restart on the same port — appear without a manual refresh. Events arriving mid-resync are queued and replayed. If a `source.updated` fell in the gap, the page reloads instead, since the snapshot cannot repair stale document HTML.
+- `GET /` is served with `Cache-Control: no-store` so a cached page can never revive a stale baked-in state seed.
+
 ## [0.6.0] - 2026-07-09
 
 ### Added

@@ -315,20 +315,47 @@ mod tests {
         assert!(page.contains("raw.threads"));
         assert!(page.contains("raw.replies"));
         assert!(page.contains("draft.updatedAt"));
-        // localStorage may only persist UI preferences (theme, ⌘-Enter-to-send),
-        // never document/thread state. The old state-in-localStorage pattern used
-        // STORAGE_KEY = 'discuss-state' — that must stay removed.
+        // localStorage may only persist UI preferences (theme, ⌘-Enter-to-send,
+        // diff view mode), never document/thread state. The old
+        // state-in-localStorage pattern used STORAGE_KEY = 'discuss-state' —
+        // that must stay removed.
         for (offset, _) in page.match_indices("localStorage") {
             let window_end = (offset + 80).min(page.len());
             let context = &page[offset..window_end];
             assert!(
                 context.contains("discuss-theme")
                     || context.contains("THEME_STORAGE_KEY")
-                    || context.contains("CMD_ENTER_KEY"),
+                    || context.contains("CMD_ENTER_KEY")
+                    || context.contains("DIFF_VIEW_STORAGE_KEY"),
                 "localStorage may only persist UI preferences; saw: {context}",
             );
         }
         assert!(!page.contains("STORAGE_KEY = 'discuss-state'"));
+    }
+
+    #[test]
+    fn bundled_template_renders_structured_diffs_with_view_toggle() {
+        let page = render_page("<p>Doc</p>", r#"{"threads":[]}"#, "[]");
+
+        // Structured diff renderer: client-side projection of the DiffData
+        // model with hunk-local data-line coordinates (line 1 = @@ header).
+        assert!(page.contains("function renderDiffFile"));
+        assert!(page.contains("function buildUnifiedHunk"));
+        assert!(page.contains("function buildSplitHunk"));
+        assert!(page.contains("data-line"));
+        // Unified ↔ split toggle, defaulting to side-by-side; the pref is a
+        // localStorage UI preference like the theme.
+        assert!(page.contains(r##"id="diff-view-toggle""##));
+        assert!(page.contains("'discuss-diff-view'"));
+        assert!(page.contains("let diffViewMode = 'split'"));
+        assert!(page.contains("function setDiffViewMode"));
+        // Diff cells highlight through the string API — highlightElement
+        // would re-fire the Prism 'complete' hook and loop renderMarkers.
+        assert!(page.contains("Prism.highlight(text, grammar, lang)"));
+        // All line-anchoring paths go through the shared helpers.
+        assert!(page.contains("function blockLineEls"));
+        assert!(page.contains("function blockLineAnchorEl"));
+        assert!(page.contains("function markLineRange"));
     }
 
     #[test]
@@ -422,6 +449,40 @@ mod tests {
         assert!(page.contains("function commentTimestamp(item)"));
         assert!(page.contains(r#".user-comment[data-kind="take"]"#));
         assert!(page.contains("const metaPrefix = it.kind === 'take' ? 'Agent take"));
+    }
+
+    #[test]
+    fn bundled_template_resyncs_state_when_the_event_stream_opens() {
+        let page = render_page("<p>Doc</p>", r#"{"threads":[]}"#, "[]");
+
+        // The SSE stream has no replay, so every 'open' (first connect and
+        // each reconnect) refetches the snapshot to fill disconnect gaps.
+        assert!(
+            page.contains("source.addEventListener('open', () => { resyncStateFromServer(); });")
+        );
+        assert!(page.contains("async function resyncStateFromServer()"));
+        assert!(page.contains("queuedEventsDuringResync"));
+        // A missed source.updated leaves stale doc HTML the snapshot cannot
+        // repair; the client reloads on a sourceVersion mismatch instead.
+        assert!(page.contains("location.reload();"));
+    }
+
+    #[test]
+    fn bundled_template_renders_agent_take_markdown() {
+        let page = render_page("<p>Doc</p>", r#"{"threads":[]}"#, "[]");
+
+        // Takes render through the escape-first client-side markdown subset;
+        // plain user replies stay escaped text.
+        assert!(page.contains("function renderCommentMarkdown(src)"));
+        assert!(
+            page.contains(r#"<div class="comment-md">${renderCommentMarkdown(it.text)}</div>"#)
+        );
+        assert!(page.contains(": escapeHtml(it.text);"));
+        // Comment code blocks highlight via Prism's string API, never
+        // highlightElement (its 'complete' hook would loop renderMarkers).
+        assert!(page.contains("function highlightCommentCode(root)"));
+        assert!(page.contains("highlightCommentCode(list);"));
+        assert!(page.contains("Prism.highlight(code.textContent, grammar, lang)"));
     }
 
     #[test]

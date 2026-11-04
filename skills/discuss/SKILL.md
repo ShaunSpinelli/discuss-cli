@@ -48,6 +48,7 @@ discuss plan.md diff          # markdown file(s) + diff in one session
 ```
 
 - `session.started` gains `mode` (`"markdown"` / `"diff"` / `"mixed"`) and `git_args` so you know what's under review.
+- The browser renders diffs side-by-side by default (unified ↔ split toggle in the header) with GitHub-style context expanders between hunks. Expanded rows are view-only; thread anchors and `lineRange` semantics are unchanged (line 1 = the `@@` header).
 - Each changed file is its own sidebar entry with its own `fileId`; per-file prose is optional — post takes on file threads when intent needs explaining, stay silent on mechanical changes.
 - Diff output is capped at 5 MB (`--max-diff-bytes` / `DISCUSS_MAX_DIFF_BYTES` / `max_diff_bytes` config to override; `0` disables).
 
