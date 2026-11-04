@@ -1278,7 +1278,8 @@
     font: inherit;
     font-size: 13px;
     resize: vertical;
-    background: white;
+    background: var(--card);
+    color: var(--ink);
   }
   .followup textarea:focus { outline: none; border-color: var(--accent); }
   .followup .actions { display: flex; gap: 6px; margin-top: 5px; align-items: center; }
@@ -1288,10 +1289,11 @@
     padding: 3px 10px;
     border-radius: 4px;
     border: 1px solid var(--line);
-    background: white;
+    background: var(--card);
+    color: var(--ink);
     cursor: pointer;
   }
-  .followup button:hover { background: #f5f5f5; }
+  .followup button:hover { background: var(--accent-hover); }
   .followup button.primary { background: var(--accent); color: white; border-color: var(--accent); }
   .followup button.resolve {
     background: var(--decision);
