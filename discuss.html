@@ -1663,7 +1663,7 @@
     position: absolute;
     left: 24px;
     right: 24px;
-    background: #fff4f7;
+    background: var(--user-note);
     border: 1px solid var(--user-note-border);
     border-radius: 6px;
     padding: 10px 12px;
@@ -1686,7 +1686,8 @@
     font: inherit;
     font-size: 13px;
     resize: vertical;
-    background: white;
+    background: var(--card);
+    color: var(--ink);
   }
   .new-thread-editor textarea:focus { outline: none; border-color: var(--accent); }
   .new-thread-editor .actions { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
@@ -1696,7 +1697,8 @@
     padding: 3px 10px;
     border-radius: 4px;
     border: 1px solid var(--line);
-    background: white;
+    background: var(--card);
+    color: var(--ink);
     cursor: pointer;
   }
   .new-thread-editor button.primary { background: var(--accent); color: white; border-color: var(--accent); }
