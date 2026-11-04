@@ -15,7 +15,8 @@
        sibling of the source document for a committed review artefact).
     2. Replace the content inside <section id="doc-content"> with whatever
        document you want reviewed. Keep it to these commentable elements:
-       h1-h5, p, li, blockquote, pre, .quote, .decision, .context, .callout.
+       h1-h5, p, li, blockquote, pre, table cells (th/td), .quote, .decision,
+       .context, .callout.
        (You can nest freely; only the outermost commentable ancestor is
        used as the anchor when a user clicks.)
     3. Optionally pre-seed threads via the JSON block
@@ -105,6 +106,7 @@
     --diff-header-bg: rgba(84, 174, 255, 0.14);
     --diff-empty-bg: rgba(0, 0, 0, 0.035);
     --diff-num-ink: #8a8a86;
+    --table-stripe: rgba(0, 0, 0, 0.022);
     --marker-blue: #3b82f6;
     --marker-yellow: #e9b949;
     --marker-pink: #d75d82;
@@ -144,6 +146,7 @@
     --pending-border: #9e6a03;
     --pending-dark: #e3b341;
     --pre-bg: #161b22;
+    --table-stripe: rgba(255, 255, 255, 0.03);
     --diff-add-bg: rgba(63, 185, 80, 0.15);
     --diff-add-num-bg: rgba(63, 185, 80, 0.30);
     --diff-del-bg: rgba(248, 81, 73, 0.15);
@@ -572,6 +575,82 @@
      id-scoped padding above wins on specificity, so we have to restate the
      left padding under the same id-scope when line-numbers is on. */
   #doc-content pre.line-numbers { padding-left: 3.8em; }
+
+  /* --- Tables ---
+     Wrapped in .table-wrap (see assignAnchorIndices) so wide tables scroll
+     horizontally inside a bordered card instead of blowing out the pane.
+     Every th/td is its own comment anchor. */
+  #doc-content .table-wrap {
+    margin: 14px 0;
+    overflow-x: auto;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    background: var(--card);
+  }
+  #doc-content table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13.5px;
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
+  }
+  #doc-content th,
+  #doc-content td {
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--line);
+  }
+  #doc-content th + th,
+  #doc-content td + td { border-left: 1px solid var(--line); }
+  #doc-content th[align="right"], #doc-content td[align="right"] { text-align: right; }
+  #doc-content th[align="center"], #doc-content td[align="center"] { text-align: center; }
+  #doc-content thead th {
+    background: var(--context);
+    font-weight: 600;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--line-strong);
+  }
+  #doc-content tbody tr:last-child td { border-bottom: 0; }
+  #doc-content tbody tr:nth-child(even) { background: var(--table-stripe); }
+  #doc-content tbody tr:hover { background: var(--accent-hover); }
+  /* Cell anchors: keep the hover/focus ring inside the cell (an outset ring
+     would be clipped by .table-wrap's overflow and overlap neighbours), and
+     drop the rounded corners so highlights tile cleanly across a row. */
+  #doc-content td[data-anchor-idx],
+  #doc-content th[data-anchor-idx] {
+    border-radius: 0;
+    outline-offset: -2px;
+  }
+  #doc-content td[data-anchor-idx]:hover,
+  #doc-content th[data-anchor-idx]:hover,
+  #doc-content td[data-anchor-idx].focused,
+  #doc-content th[data-anchor-idx].focused,
+  #doc-content td[data-anchor-idx].in-range,
+  #doc-content th[data-anchor-idx].in-range,
+  #doc-content td[data-anchor-idx].thread-active,
+  #doc-content th[data-anchor-idx].thread-active {
+    outline-offset: -2px;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  /* Cell markers sit in the cell's top-right corner rather than the page
+     gutter (which, for a cell, would land on top of the next column). */
+  #doc-content td.has-thread,
+  #doc-content th.has-thread { padding-right: 30px; }
+  #doc-content td > .thread-marker-stack,
+  #doc-content th > .thread-marker-stack {
+    right: 5px;
+    top: 6px;
+    flex-direction: row;
+    gap: 2px;
+  }
+  #doc-content td > .thread-marker-stack .thread-marker,
+  #doc-content th > .thread-marker-stack .thread-marker {
+    width: 18px;
+    height: 18px;
+    font-size: 9px;
+  }
   #doc-content pre code { background: none; padding: 0; font-size: inherit; }
   #doc-content pre.mermaid-block {
     background: transparent;
@@ -1700,6 +1779,7 @@
           <li><code>p</code>, <code>li</code> — standard prose.</li>
           <li><code>blockquote</code> — an attributed quote.</li>
           <li><code>pre</code> — multi-line code or log blocks.</li>
+          <li><code>table</code> — each <code>th</code>/<code>td</code> cell is commentable on its own.</li>
           <li><code>.quote</code> — a highlighted input or question (yellow).</li>
           <li><code>.decision</code> — a captured decision (green).</li>
           <li><code>.callout</code> — a generic highlighted note (blue).</li>
@@ -3064,7 +3144,9 @@
   // Any element matching this selector inside #doc-content becomes commentable.
   // <pre> is commented-on via a generated .pre-wrap wrapper because <pre>'s
   // own overflow-x: auto clips the absolutely-positioned gutter marker.
-  const COMMENTABLE_SELECTOR = 'h1, h2, h3, h4, h5, p, li, blockquote, .pre-wrap, .quote, .decision, .callout, .context, .diff-hunk';
+  // Table cells (th/td) are individually commentable; drag-select across a
+  // row to comment on several cells at once.
+  const COMMENTABLE_SELECTOR = 'h1, h2, h3, h4, h5, p, li, blockquote, .pre-wrap, .quote, .decision, .callout, .context, .diff-hunk, th, td';
   function assignAnchorIndices() {
     const doc = document.getElementById('doc-content');
     if (!doc) return;
@@ -3076,6 +3158,14 @@
       wrap.className = 'pre-wrap';
       pre.parentElement.insertBefore(wrap, pre);
       wrap.appendChild(pre);
+    });
+    // Wrap tables so wide ones scroll horizontally inside a bordered card.
+    doc.querySelectorAll('table').forEach(table => {
+      if (table.parentElement && table.parentElement.classList.contains('table-wrap')) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'table-wrap';
+      table.parentElement.insertBefore(wrap, table);
+      wrap.appendChild(table);
     });
     const nodes = Array.from(doc.querySelectorAll(COMMENTABLE_SELECTOR));
     // If an element is nested inside another commentable (e.g. <li> inside a
@@ -3814,14 +3904,34 @@
     }
     return (clone.textContent || '').trim();
   }
+  // A bare cell value ("Pending", "3") means nothing to the agent on its own,
+  // so prefix table cells with their row label and column header:
+  // "Auth service › Status: Pending". Header cells become "Column: Status".
+  function tableCellContext(el) {
+    if (!el || (el.tagName !== 'TD' && el.tagName !== 'TH')) return '';
+    const row = el.parentElement;
+    const table = el.closest('table');
+    if (!row || !table) return '';
+    const col = Array.prototype.indexOf.call(row.children, el);
+    if (el.tagName === 'TH' && row.parentElement && row.parentElement.tagName === 'THEAD') return 'Column';
+    const headerRow = table.querySelector('thead tr');
+    const header = headerRow && headerRow.children[col] ? anchorPlainText(headerRow.children[col]) : '';
+    const rowLabel = col > 0 && row.children[0] ? anchorPlainText(row.children[0]) : '';
+    return [rowLabel, header].filter(Boolean).join(' › ');
+  }
+  function anchorContextText(el) {
+    const text = anchorPlainText(el);
+    const ctx = tableCellContext(el);
+    return ctx ? `${ctx}: ${text}` : text;
+  }
   function snippetOfAnchor(anchorEl) {
-    return anchorPlainText(anchorEl).replace(/\s+/g, ' ').slice(0, 140);
+    return anchorContextText(anchorEl).replace(/\s+/g, ' ').slice(0, 140);
   }
   function snippetOfRange(startIdx, endIdx) {
     const parts = [];
     for (let i = startIdx; i <= endIdx; i++) {
       const el = getAnchorElByIdx(i);
-      if (el) parts.push(anchorPlainText(el));
+      if (el) parts.push(anchorContextText(el));
     }
     return parts.join(' / ').replace(/\s+/g, ' ').slice(0, 220);
   }
