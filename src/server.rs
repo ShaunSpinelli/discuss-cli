@@ -113,6 +113,9 @@ pub struct AppState {
     activity: ActivityTracker,
     idle_timeout_secs: Arc<AtomicU64>,
     verdict_config: Arc<Option<VerdictConfig>>,
+    /// Set in PR sessions: context expansion reads the head side from
+    /// GitHub, and the description's attachments are proxied.
+    pr: Arc<Option<crate::pr::PrSession>>,
     next_thread_number: Arc<AtomicU64>,
     next_reply_number: Arc<AtomicU64>,
     next_take_number: Arc<AtomicU64>,
@@ -136,6 +139,7 @@ impl AppState {
             activity: ActivityTracker::new(),
             idle_timeout_secs: Arc::new(AtomicU64::new(Config::default().idle_timeout_secs)),
             verdict_config: Arc::new(None),
+            pr: Arc::new(None),
             next_thread_number: Arc::new(AtomicU64::new(1)),
             next_reply_number: Arc::new(AtomicU64::new(1)),
             next_take_number: Arc::new(AtomicU64::new(1)),
@@ -221,6 +225,19 @@ impl AppState {
             .collect();
         snapshot.verdict_config = self.verdict_config.as_ref().clone();
         Ok(snapshot)
+    }
+
+    pub fn with_pr_session(mut self, pr: crate::pr::PrSession) -> Self {
+        self.pr = Arc::new(Some(pr));
+        self
+    }
+
+    /// Whether a file's markdown may contain raw HTML (the PR description).
+    fn renders_raw_html(&self, file: &File) -> bool {
+        self.pr
+            .as_ref()
+            .as_ref()
+            .is_some_and(|pr| pr.description_file == file.id)
     }
 
     pub fn with_source_path(mut self, source_path: impl Into<PathBuf>) -> Self {
@@ -533,6 +550,7 @@ fn build_router(app_state: AppState) -> Router {
         )
         .route("/api/source", post(post_api_source))
         .route("/api/files/{id}/context", get(get_api_file_context))
+        .route("/api/pr-assets/{name}", get(get_api_pr_asset))
         .route("/api/threads", post(post_api_threads))
         .route("/api/threads/{id}", delete(delete_api_thread))
         .route("/api/threads/{id}/replies", post(post_api_thread_replies))
@@ -854,7 +872,8 @@ async fn post_api_source(
     };
     app_state.record_mutation();
 
-    let (rendered_html, diff) = render_file_payload(&updated_file);
+    let (rendered_html, diff) =
+        render_file_payload(&updated_file, app_state.renders_raw_html(&updated_file));
     let thread_anchors = threads
         .iter()
         .filter(|thread| thread.file_id == file_id)
@@ -1923,7 +1942,7 @@ fn render_root_page(app_state: &AppState) -> std::result::Result<String, String>
         .files
         .iter()
         .map(|file| {
-            let (html, diff) = render_file_payload(file);
+            let (html, diff) = render_file_payload(file, app_state.renders_raw_html(file));
             RenderedFile {
                 id: file.id.clone(),
                 html,
@@ -1964,8 +1983,12 @@ struct RenderedFile {
 /// Renders one source file into its browser payload: markdown files become
 /// HTML through the markdown renderer; diff files become a structured
 /// `DiffData` model the client renders itself.
-fn render_file_payload(file: &File) -> (Option<String>, Option<crate::diff::DiffData>) {
+fn render_file_payload(
+    file: &File,
+    raw_html: bool,
+) -> (Option<String>, Option<crate::diff::DiffData>) {
     match file.kind {
+        FileKind::Markdown if raw_html => (Some(render::render_trusted(&file.content)), None),
         FileKind::Markdown => (Some(render::render(&file.content)), None),
         FileKind::Diff => (
             None,
@@ -1986,6 +2009,40 @@ struct FileContextResponse {
     file_id: FileId,
     section: usize,
     content: String,
+}
+
+/// A PR description attachment (image/video), proxied from GitHub because
+/// the browser has no GitHub session for it. `name` is `<asset id>.<ext>`.
+async fn get_api_pr_asset(
+    AxumState(app_state): AxumState<AppState>,
+    Path(name): Path<String>,
+) -> Response {
+    let Some(pr) = app_state.pr.as_ref().clone() else {
+        return api_error_response(StatusCode::NOT_FOUND, "not_found", "not a PR session");
+    };
+    let id = name.split('.').next().unwrap_or_default().to_string();
+    match tokio::task::spawn_blocking(move || pr.assets.get(&id)).await {
+        Ok(Ok((content_type, bytes))) => (
+            [
+                (axum::http::header::CONTENT_TYPE, content_type),
+                (
+                    axum::http::header::CACHE_CONTROL,
+                    "private, max-age=86400".to_string(),
+                ),
+            ],
+            bytes.as_ref().clone(),
+        )
+            .into_response(),
+        Ok(Err(error)) => {
+            tracing::warn!(%name, %error, "PR attachment unavailable");
+            api_error_response(StatusCode::NOT_FOUND, "not_found", error.to_string())
+        }
+        Err(join_error) => api_error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            format!("attachment task failed: {join_error}"),
+        ),
+    }
 }
 
 /// Whole new-side file content for one diff section, fetched on demand by
@@ -2049,8 +2106,12 @@ async fn get_api_file_context(
     let path = section.path.clone();
     let blob = section.new_blob.clone();
     let file_id = file.id.clone();
-    match tokio::task::spawn_blocking(move || crate::diff::read_new_side(&path, blob.as_deref()))
-        .await
+    let pr = app_state.pr.as_ref().clone();
+    match tokio::task::spawn_blocking(move || match pr {
+        Some(pr) => crate::pr::read_head_file(&pr.repo, &pr.head_sha, &path),
+        None => crate::diff::read_new_side(&path, blob.as_deref()),
+    })
+    .await
     {
         Ok(Ok(content)) => Json(FileContextResponse {
             file_id,

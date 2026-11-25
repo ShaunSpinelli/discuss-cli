@@ -508,6 +508,24 @@
     padding: 0 5px;
   }
   .file-item .file-count.zero { display: none; }
+  /* Multi-section diff files (PR sessions) list each changed file under
+     the diff's sidebar entry; clicking one scrolls to that section. */
+  .file-item.file-section-item { padding: 4px 8px 4px 22px; font-size: 12px; }
+  .diff-section { scroll-margin-top: 16px; }
+  /* Screenshots and videos (e.g. in PR descriptions) fit the column. */
+  #doc-content img, #doc-content video { max-width: 100%; height: auto; }
+  /* Spec/test sections stay hidden until the sidebar toggle is on. */
+  .file-test-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 8px 8px;
+    font-size: 12px;
+    color: var(--muted, #888);
+    cursor: pointer;
+  }
+  body:not(.show-tests) .diff-section[data-test],
+  body:not(.show-tests) .file-section-item[data-test] { display: none; }
   #divider { align-self: stretch; }
   .pane-left, .pane-right { min-width: 0; }
   .pane-left {
@@ -3199,6 +3217,8 @@
       // .patch can mix languages) and groups a section's gaps and hunks.
       const sectionEl = document.createElement('section');
       sectionEl.className = 'diff-section';
+      sectionEl.id = 'diff-section-' + (sectionIdx + 1);
+      if (section.test) sectionEl.setAttribute('data-test', '');
       doc.appendChild(sectionEl);
 
       const heading = document.createElement('h3');
@@ -3645,6 +3665,24 @@
     title.className = 'file-sidebar-title';
     title.textContent = `Files (${discussFiles.length})`;
     nav.appendChild(title);
+    const testCount = discussFiles.reduce((n, file) => n + multiSectionList(file.id)
+      .filter(section => section.test).length, 0);
+    document.body.classList.remove('show-tests');
+    if (testCount > 0) {
+      const label = document.createElement('label');
+      label.className = 'file-test-toggle';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.addEventListener('change', () => {
+        document.body.classList.toggle('show-tests', box.checked);
+        renderAllThreads();
+        scheduleReposition();
+        updateActiveSectionItem();
+      });
+      label.appendChild(box);
+      label.appendChild(document.createTextNode(`Show spec/test files (${testCount})`));
+      nav.appendChild(label);
+    }
     discussFiles.forEach(file => {
       const item = document.createElement('button');
       item.type = 'button';
@@ -3674,9 +3712,79 @@
       item.appendChild(count);
       item.addEventListener('click', () => switchToFile(file.id));
       nav.appendChild(item);
+      multiSectionList(file.id).forEach((section, idx) => {
+        nav.appendChild(buildSectionItem(file.id, section, idx + 1));
+      });
     });
     updateFileSidebar();
   }
+
+  // Sections of a diff file that holds several changed files (a PR, or a
+  // multi-file .patch); empty for single-section diffs and markdown.
+  function multiSectionList(fileId) {
+    const data = diffDataByFile.get(String(fileId));
+    return data && data.sections.length > 1 ? data.sections : [];
+  }
+
+  function buildSectionItem(fileId, section, sectionNo) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'file-item file-section-item';
+    item.setAttribute('data-section-file', fileId);
+    item.setAttribute('data-section-no', String(sectionNo));
+    if (section.test) item.setAttribute('data-test', '');
+    const path = String(section.path || '');
+    item.title = path;
+    // File name first so truncation cuts the (long) directory, not the name.
+    const name = document.createElement('span');
+    name.className = 'file-name';
+    const slash = path.lastIndexOf('/');
+    name.appendChild(document.createTextNode(slash >= 0 ? path.slice(slash + 1) : path));
+    if (slash >= 0) {
+      const dir = document.createElement('span');
+      dir.className = 'file-dir';
+      dir.textContent = ' ' + path.slice(0, slash);
+      name.appendChild(dir);
+    }
+    item.appendChild(name);
+    item.addEventListener('click', () => {
+      const jump = () => {
+        const target = document.getElementById('diff-section-' + sectionNo);
+        if (target) target.scrollIntoView({ block: 'start', behavior: 'instant' });
+      };
+      if (String(fileId) === activeFileId) { jump(); return; }
+      // switchToFile resets the scroll to the top; jump once that settles.
+      switchToFile(fileId);
+      requestAnimationFrame(() => requestAnimationFrame(jump));
+    });
+    return item;
+  }
+
+  // Highlights the sidebar entry of the diff section at the top of the view.
+  function updateActiveSectionItem() {
+    const items = document.querySelectorAll('.file-section-item');
+    if (!items.length) return;
+    let current = null;
+    document.querySelectorAll('#doc-content .diff-section').forEach(el => {
+      if (el.offsetParent === null) return;
+      if (el.getBoundingClientRect().top <= 120) current = el.id;
+    });
+    items.forEach(item => {
+      const isCurrent = item.getAttribute('data-section-file') === activeFileId
+        && 'diff-section-' + item.getAttribute('data-section-no') === current;
+      item.classList.toggle('active', isCurrent);
+      if (isCurrent && item.scrollIntoView) item.scrollIntoView({ block: 'nearest' });
+    });
+  }
+  let sectionScrollQueued = false;
+  document.addEventListener('scroll', () => {
+    if (sectionScrollQueued) return;
+    sectionScrollQueued = true;
+    requestAnimationFrame(() => {
+      sectionScrollQueued = false;
+      updateActiveSectionItem();
+    });
+  }, true);
 
   // Refreshes active-file highlight and per-file open-thread badges. Runs on
   // every meta-status refresh so agent-created threads on background files
@@ -3697,7 +3805,7 @@
       const fid = t.fileId ? String(t.fileId) : DEFAULT_FILE_ID;
       openByFile.set(fid, (openByFile.get(fid) || 0) + 1);
     });
-    nav.querySelectorAll('.file-item').forEach(item => {
+    nav.querySelectorAll('.file-item[data-file-id]').forEach(item => {
       const id = item.getAttribute('data-file-id');
       item.classList.toggle('active', id === activeFileId);
       const open = openByFile.get(id) || 0;

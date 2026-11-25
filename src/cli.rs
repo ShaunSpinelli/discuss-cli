@@ -86,6 +86,31 @@ Combines with the file list: `discuss plan.md diff HEAD~1..HEAD` reviews the mar
 the diff together in one session."
     )]
     Diff(DiffArgs),
+
+    #[command(
+        about = "Review a GitHub pull request in the browser.",
+        long_about = "Review a GitHub pull request in the browser.\n\n\
+Shows the PR description as the first file, then one diff per changed file. Spec/test files\n\
+are hidden by default behind a sidebar toggle. Requires the GitHub CLI (`gh`) to be installed\n\
+and authenticated."
+    )]
+    Pr(PrArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct PrArgs {
+    #[arg(
+        value_name = "PR",
+        help = "Pull request URL (or a number/branch, resolved by `gh` in the current repo)."
+    )]
+    pub pr: String,
+
+    #[arg(
+        long,
+        value_name = "BYTES",
+        help = "Override the diff size cap (default 5 MB). Use 0 to disable the cap."
+    )]
+    pub max_diff_bytes: Option<usize>,
 }
 
 #[derive(Debug, clap::Args)]
@@ -195,6 +220,18 @@ mod tests {
                 PathBuf::from("b.md"),
             ]
         );
+    }
+
+    #[test]
+    fn parses_pr_subcommand_with_url() {
+        let args = Args::try_parse_from(["discuss", "pr", "https://github.com/o/r/pull/12"])
+            .expect("pr should parse");
+
+        let Some(Commands::Pr(pr_args)) = args.command else {
+            panic!("expected pr subcommand");
+        };
+        assert_eq!(pr_args.pr, "https://github.com/o/r/pull/12");
+        assert_eq!(pr_args.max_diff_bytes, None);
     }
 
     #[test]

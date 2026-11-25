@@ -47,6 +47,9 @@ pub struct DiffSection {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub new_blob: Option<String>,
     pub hunks: Vec<Hunk>,
+    /// Spec/test file. Multi-section diff views hide these behind a toggle.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub test: bool,
     /// Non-git content (plain unified diff without `diff --git` headers)
     /// renders through the legacy fenced-block path instead of `hunks`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -232,6 +235,7 @@ pub fn parse_diff(fallback_path: &str, content: &str) -> DiffData {
                 deleted: false,
                 new_blob: None,
                 hunks: Vec::new(),
+                test: false,
                 raw: Some(content.to_string()),
             }],
         };
@@ -295,6 +299,7 @@ fn parse_section(file: &DiffFile) -> DiffSection {
             parse_new_blob_hash(&header)
         },
         hunks,
+        test: crate::pr::is_test_path(&file.path),
         raw: None,
     }
 }

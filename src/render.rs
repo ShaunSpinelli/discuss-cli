@@ -1,12 +1,24 @@
 use comrak::{Options, markdown_to_html};
 
 pub fn render(markdown: &str) -> String {
+    render_with(markdown, &render_options())
+}
+
+/// Like `render`, but passes raw HTML through. Only for trusted content (a
+/// PR description), which embeds `<img>`, `<video>` and `<details>` tags.
+pub fn render_trusted(markdown: &str) -> String {
+    let mut options = render_options();
+    options.render.r#unsafe = true;
+    render_with(markdown, &options)
+}
+
+fn render_with(markdown: &str, options: &Options) -> String {
     if let Some((frontmatter, body)) = split_frontmatter(markdown) {
         let mut out = render_frontmatter_block(frontmatter);
-        out.push_str(&markdown_to_html(body, &render_options()));
+        out.push_str(&markdown_to_html(body, options));
         out
     } else {
-        markdown_to_html(markdown, &render_options())
+        markdown_to_html(markdown, options)
     }
 }
 

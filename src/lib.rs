@@ -21,6 +21,7 @@ pub mod exit;
 pub mod history;
 pub mod launch;
 pub mod logging;
+pub mod pr;
 pub mod render;
 pub mod server;
 pub mod sse;
@@ -101,15 +102,35 @@ where
             Ok(())
         }
         Some(cli::Commands::Diff(diff_args)) => {
-            run_review_session(files, Some(diff_args), verdict_config, &config, shutdown).await
+            run_review_session(
+                files,
+                Some(diff_args),
+                None,
+                verdict_config,
+                &config,
+                shutdown,
+            )
+            .await
         }
-        None => run_review_session(files, None, verdict_config, &config, shutdown).await,
+        Some(cli::Commands::Pr(pr_args)) => {
+            run_review_session(
+                files,
+                None,
+                Some(pr_args),
+                verdict_config,
+                &config,
+                shutdown,
+            )
+            .await
+        }
+        None => run_review_session(files, None, None, verdict_config, &config, shutdown).await,
     }
 }
 
 async fn run_review_session<F>(
     files: Vec<PathBuf>,
     diff_args: Option<cli::DiffArgs>,
+    pr_args: Option<cli::PrArgs>,
     verdict_config: Option<verdict::VerdictConfig>,
     config: &Config,
     shutdown: F,
@@ -117,25 +138,33 @@ async fn run_review_session<F>(
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    // In diff mode a bare invocation reviews the diff alone; stdin is only
+    // In diff/PR mode a bare invocation reviews the diff alone; stdin is only
     // read when explicitly requested with `-`.
-    let inputs = if diff_args.is_some() && files.is_empty() {
+    let inputs = if (diff_args.is_some() || pr_args.is_some()) && files.is_empty() {
         Vec::new()
     } else {
         resolve_inputs(files)?.expect("no-input case is short-circuited before tracing init")
     };
 
+    let max_diff_bytes = diff_args
+        .as_ref()
+        .and_then(|args| args.max_diff_bytes)
+        .or(pr_args.as_ref().and_then(|args| args.max_diff_bytes))
+        .or(config.max_diff_bytes)
+        .unwrap_or(diff::DEFAULT_DIFF_SIZE_LIMIT_BYTES);
+    let limit_bytes = if max_diff_bytes == 0 {
+        usize::MAX
+    } else {
+        max_diff_bytes
+    };
+
+    let pr_output = match &pr_args {
+        Some(pr_args) => Some(pr::fetch_pr(&pr_args.pr, limit_bytes)?),
+        None => None,
+    };
+
     let diff_output = match &diff_args {
         Some(diff_args) => {
-            let limit_bytes = diff_args
-                .max_diff_bytes
-                .or(config.max_diff_bytes)
-                .unwrap_or(diff::DEFAULT_DIFF_SIZE_LIMIT_BYTES);
-            let limit_bytes = if limit_bytes == 0 {
-                usize::MAX
-            } else {
-                limit_bytes
-            };
             let output = diff::run_git_diff(diff_args.unstaged, &diff_args.args, limit_bytes)?;
             if output.files.is_empty() {
                 return Err(DiscussError::DiffError {
@@ -148,6 +177,7 @@ where
     };
 
     let mode = match (&diff_output, inputs.is_empty()) {
+        _ if pr_output.is_some() => "pr",
         (None, _) => "markdown",
         (Some(_), true) => "diff",
         (Some(_), false) => "mixed",
@@ -158,10 +188,29 @@ where
         .unwrap_or_default();
 
     let primary_source_path = inputs.iter().find_map(|input| input.source_path.clone());
-    let mut session_files: Vec<(String, FileKind, String)> = inputs
-        .into_iter()
-        .map(|input| (input.source_file, input.kind, input.markdown_source))
-        .collect();
+    let mut session_files: Vec<(String, FileKind, String)> = Vec::new();
+    let mut pr_session = None;
+    let mut pr_url = None;
+    if let Some(output) = &pr_output {
+        session_files.push((
+            format!("PR #{} description", output.number),
+            FileKind::Markdown,
+            output.description.clone(),
+        ));
+        pr_session = Some(pr::PrSession {
+            repo: output.repo.clone(),
+            head_sha: output.head_sha.clone(),
+            // The description is always the first file.
+            description_file: FileId("f-1".to_string()),
+            assets: output.assets.clone(),
+        });
+        pr_url = Some(output.url.clone());
+    }
+    session_files.extend(
+        inputs
+            .into_iter()
+            .map(|input| (input.source_file, input.kind, input.markdown_source)),
+    );
     if let Some(output) = diff_output {
         session_files.extend(
             output
@@ -170,9 +219,20 @@ where
                 .map(|file| (file.path, FileKind::Diff, file.content)),
         );
     }
+    if let Some(output) = pr_output {
+        // One diff file holding every section, so the browser shows all
+        // changes in a single scroll.
+        session_files.push((
+            format!("PR #{} changes", output.number),
+            FileKind::Diff,
+            output.diff,
+        ));
+    }
 
     let files_count = session_files.len();
-    let session_source_label = if mode == "diff" {
+    let session_source_label = if let Some(url) = &pr_url {
+        url.clone()
+    } else if mode == "diff" {
         format!("git {}", git_args.join(" "))
     } else if files_count > 1 {
         format!("multi-{files_count}-files")
@@ -208,6 +268,9 @@ where
     if let Some(source_path) = primary_source_path {
         app_state = app_state.with_source_path(source_path);
     }
+    if let Some(pr_session) = pr_session {
+        app_state = app_state.with_pr_session(pr_session);
+    }
     if let Some(history_dir) = config.history_dir.clone() {
         app_state = app_state.with_history_dir(history_dir);
     }
@@ -226,6 +289,9 @@ where
         });
         if !git_args.is_empty() {
             payload["git_args"] = serde_json::json!(git_args);
+        }
+        if let Some(pr_url) = &pr_url {
+            payload["pr_url"] = serde_json::json!(pr_url);
         }
 
         if let Err(error) = emitter.emit(&Event {

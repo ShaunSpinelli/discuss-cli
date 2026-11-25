@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `discuss pr <url>` reviews a GitHub pull request through the `gh` CLI: the PR description opens as the first file, followed by every changed file in one scrolling diff. The sidebar lists each changed file and jumps to it. Images and videos in the description render through a local proxy, because GitHub attachments need a signed-in browser. Spec/test files are hidden behind a "Show spec/test files" sidebar toggle, and context expansion reads the PR head from GitHub, so no local checkout is needed.
 - GitHub-style side-by-side (split) diff view with a unified ↔ split toggle in the browser header. Sessions open in split view by default; the choice persists as a UI preference (`discuss-diff-view`).
 - Context expansion for diff reviews: expander buttons above, between, and below hunks reveal surrounding file lines on demand via the new `GET /api/files/{id}/context` endpoint. Expanded rows are view-only (GitHub behavior), so existing thread anchors never shift.
 - Diff files now ship a structured model (`sections` → `hunks` → `lines`) to the browser instead of pre-rendered HTML; both diff views render client-side from it. Thread anchor semantics (`anchorStart`/`anchorEnd` + hunk-local `lineRange`, line 1 = the `@@` header) are unchanged.
